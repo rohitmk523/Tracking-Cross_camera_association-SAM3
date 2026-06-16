@@ -29,7 +29,11 @@ def _card(report) -> str:
         f"- sources used: `{report.sources_used}`",
         f"- duplicate frames skipped (cross-source): {report.duplicates_skipped}",
         f"- frames dropped (empty after remap): {report.frames_dropped_empty}",
-        "",
+        f"- frames UNRESOLVED to a known game (not admitted): {report.frames_unresolved}"
+        + (f"  e.g. {report.unresolved_samples[:6]}" if report.unresolved_samples else ""),
+        f"- frames off split_map (resolved but not selected): {report.frames_off_split}",
+        "",]
+    lines += [
         "## Per-split counts", "",
         "| split | images | " + " | ".join(report.target_classes) + " | games |",
         "|---|---|" + "---|" * len(report.target_classes) + "---|",
@@ -42,8 +46,12 @@ def _card(report) -> str:
         lines.append(f"| {split} | {s.get('images', 0)} | {cells} | {games} |")
     if report.val_mode == "held_out_game":
         lines += ["", "> NOTE: `valid` == `test` (single held-out game). Early-stopping "
-                  "uses the held-out game as a cross-game signal; reported test == val. "
-                  "Annotate a 3rd game (from the *fresh* set) to make val != test."]
+                  "selects on the test set — reported test == val. Prefer "
+                  "`temporal_holdout`, or annotate a 3rd game to make val != test."]
+    elif report.val_mode == "temporal_holdout":
+        lines += ["", "> NOTE: `valid` is an in-domain temporal tail of the TRAIN game "
+                  "(for early-stopping); `test` (the held-out game) is untouched. "
+                  "True cross-court val awaits a 2nd venue / 3rd game (docs/14)."]
     if report.warnings:
         lines += ["", "## Warnings", *[f"- {w}" for w in report.warnings]]
     return "\n".join(lines) + "\n"

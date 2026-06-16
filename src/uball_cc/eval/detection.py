@@ -40,26 +40,34 @@ def _in_band(box_xyxy, h: int, band: tuple[float, float]) -> bool:
 
 def run_predictions(detector: Detector, coco_gt, images_dir: Path,
                     max_images: int | None = None):
-    """Run the detector over GT images. Returns (coco_predictions, per_image_dets)."""
+    """Run the detector over GT images.
+
+    Returns (coco_predictions, per_image_dets, ok_img_ids, failed_file_names).
+    Images that fail to load are EXCLUDED from ok_img_ids so they never pollute
+    the COCO/recall denominators as phantom false-negatives (review finding #2).
+    """
     import cv2
     preds: list[dict] = []
     per_image: dict[int, list[Detection]] = {}
     img_ids = sorted(coco_gt.getImgIds())
     if max_images:
         img_ids = img_ids[:max_images]
+    ok_ids: list[int] = []
+    failed: list[str] = []
     for img_id in img_ids:
         info = coco_gt.loadImgs(img_id)[0]
         img = cv2.imread(str(images_dir / info["file_name"]))
         if img is None:
-            per_image[img_id] = []
+            failed.append(info["file_name"])
             continue
+        ok_ids.append(img_id)
         dets = detector.predict(img)
         per_image[img_id] = dets
         for d in dets:
             x1, y1, x2, y2 = d.box_xyxy
             preds.append({"image_id": img_id, "category_id": d.class_id + 1,
                           "bbox": [x1, y1, x2 - x1, y2 - y1], "score": d.score})
-    return preds, per_image, img_ids
+    return preds, per_image, ok_ids, failed
 
 
 def _coco_summarize(coco_gt, preds, img_ids, cat_ids):
@@ -85,22 +93,31 @@ def evaluate_detection(detector: Detector, coco_gt_path: Path, images_dir: Path,
         coco_gt = COCO(str(coco_gt_path))
     cats = {c["id"]: c["name"] for c in coco_gt.loadCats(coco_gt.getCatIds())}
 
-    preds, per_image, img_ids = run_predictions(detector, coco_gt, images_dir, max_images)
+    preds, per_image, img_ids, failed = run_predictions(
+        detector, coco_gt, images_dir, max_images)
+    if failed:
+        print(f"WARNING: {len(failed)} image(s) failed to load and were EXCLUDED "
+              f"from metrics (e.g. {failed[:3]}).")
 
     overall = _coco_summarize(coco_gt, preds, img_ids, None)
     result: dict = {
         "detector": getattr(detector, "name", type(detector).__name__),
         "gt": str(coco_gt_path), "n_images": len(img_ids), "n_predictions": len(preds),
+        "n_images_failed": len(failed),
         "overall": _stats_dict(overall),
         "per_class": {},
     }
     for cid, name in cats.items():
         s = _coco_summarize(coco_gt, preds, img_ids, [cid])
-        result["per_class"][name] = _stats_dict(s)
+        result["per_class"][name] = _stats_dict(s, gt_count=_cat_gt_count(coco_gt, cid, img_ids))
 
     result["far_endline_band"] = _roi_band_recall(
         coco_gt, per_image, img_ids, roi_cfg, player_cat_id=_player_cat(cats))
     return result
+
+
+def _cat_gt_count(coco_gt, cat_id: int, img_ids: list[int]) -> int:
+    return len(coco_gt.getAnnIds(imgIds=img_ids, catIds=[cat_id]))
 
 
 def _player_cat(cats: dict[int, str]) -> int:
@@ -110,18 +127,27 @@ def _player_cat(cats: dict[int, str]) -> int:
     return min(cats)            # fallback: first category
 
 
-def _stats_dict(stats) -> dict:
+def _stats_dict(stats, gt_count: int | None = None) -> dict:
     if stats is None:
         return {"mAP_50_95": None, "mAP_50": None, "AP_small": None,
-                "AR_100": None, "note": "no predictions"}
+                "AR_100": None, "gt_count": gt_count, "note": "no predictions"}
+    # pycocotools returns -1.0 for a category/area with no GT -> report None, not -1.
+    if gt_count == 0 or float(stats[1]) < 0:
+        return {"mAP_50_95": None, "mAP_50": None, "AP_small": None,
+                "AR_100": None, "gt_count": gt_count or 0,
+                "note": "no GT for this category in split"}
+
+    def _v(x):
+        return None if float(x) < 0 else round(float(x), 4)   # -1 sentinel -> None
     return {
-        "mAP_50_95": round(float(stats[0]), 4),
-        "mAP_50": round(float(stats[1]), 4),
-        "AP_small": round(float(stats[3]), 4),
-        "AP_medium": round(float(stats[4]), 4),
-        "AP_large": round(float(stats[5]), 4),
-        "AR_100": round(float(stats[8]), 4),
-        "AR_small": round(float(stats[9]), 4),
+        "mAP_50_95": _v(stats[0]),
+        "mAP_50": _v(stats[1]),
+        "AP_small": _v(stats[3]),
+        "AP_medium": _v(stats[4]),
+        "AP_large": _v(stats[5]),
+        "AR_100": _v(stats[8]),
+        "AR_small": _v(stats[9]),
+        "gt_count": gt_count,
     }
 
 
@@ -171,9 +197,11 @@ def _roi_band_recall(coco_gt, per_image, img_ids, roi_cfg, player_cat_id) -> dic
                     for a in coco_gt.loadAnns(coco_gt.getAnnIds(imgIds=img_id))
                     if a["category_id"] == player_cat_id
                     and _gt_in_band(_xywh_to_xyxy(a["bbox"]), h, angle, mode, thr, roi_cfg)]
+        # Match in-band GT against ALL player predictions, NOT band-filtered ones:
+        # a correct detection counts regardless of its own predicted box size
+        # (review #1 -- pre-filtering preds silently deflated the headline metric).
         preds = sorted([d for d in per_image.get(img_id, [])
-                        if d.class_id + 1 == player_cat_id
-                        and _gt_in_band(d.box_xyxy, h, angle, mode, thr, roi_cfg)],
+                        if d.class_id + 1 == player_cat_id],
                        key=lambda d: -d.score)
         used = [False] * len(gt_boxes)
         m = 0

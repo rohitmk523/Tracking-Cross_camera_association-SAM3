@@ -65,3 +65,30 @@ def test_dummy_detector_scores_low(tmp_path):
     roi = {"band_mode": "small_box_percentile", "small_box_percentile": 50}
     res = evaluate_detection(DummyDetector(), gt, images, roi)
     assert res["per_class"]["player"]["mAP_50"] < 0.5
+
+
+class _OversizedDetector:
+    """Correctly localizes the GT (IoU>=0.5) but predicts a TALLER box than the
+    band threshold -- must still count toward band recall (review #1)."""
+    name = "oversized"
+
+    def predict(self, image_bgr):
+        return [Detection((78, 50, 122, 152), 0.99, 0)]  # taller than GT (h=102 vs 80)
+
+
+def test_band_recall_counts_oversized_prediction(tmp_path):
+    gt, images = _tiny_dataset(tmp_path)
+    # threshold sits between GT height (80) and predicted height (102)
+    roi = {"band_mode": "small_box_px", "small_box_h_px": 90}
+    res = evaluate_detection(_OversizedDetector(), gt, images, roi)
+    assert res["far_endline_band"]["player_gt_in_band"] == 2      # GT in band
+    assert res["far_endline_band"]["recall@0.5"] == pytest.approx(1.0)
+
+
+def test_no_gt_category_reports_none_not_sentinel(tmp_path):
+    # the tiny dataset has zero referee/ball GT -> mAP must be None, never -1.0
+    gt, images = _tiny_dataset(tmp_path)
+    roi = {"band_mode": "small_box_percentile", "small_box_percentile": 50}
+    res = evaluate_detection(_PerfectDetector(), gt, images, roi)
+    assert res["per_class"]["ball"]["mAP_50"] is None
+    assert res["per_class"]["ball"]["gt_count"] == 0

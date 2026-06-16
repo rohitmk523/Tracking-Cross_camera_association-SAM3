@@ -47,8 +47,11 @@ def _bundle_files() -> list[tuple[Path, str]]:
             d = DATASET / split / sub
             if d.is_dir():
                 for p in sorted(d.iterdir()):
-                    if p.is_file() and not p.is_symlink():
-                        pairs.append((p, f"{base}/{split}/{sub}/{p.name}"))
+                    # Resolve symlinks so the REAL file content is bundled -- a bare
+                    # is_symlink skip would silently ship an EMPTY dataset when the
+                    # consolidation used image_mode=symlink (review #9).
+                    if p.is_file():            # is_file() follows symlinks
+                        pairs.append((p.resolve(), f"{base}/{split}/{sub}/{p.name}"))
     return pairs
 
 
@@ -106,8 +109,11 @@ sleep 5; shutdown -h now
 def _guard_rotation(a) -> None:
     """Refuse to spend AWS on un-rotated, flagged credentials (docs/11)."""
     import boto3
-    flagged = str(AWS.get("flagged_account", ""))
+    flagged = str(AWS.get("flagged_account", "")).strip()
     confirmed = a.i_rotated_creds or os.environ.get("UBALL_AWS_CREDS_ROTATED") == "1"
+    if not flagged:                              # fail CLOSED (review #16)
+        sys.exit("config aws.flagged_account is empty -- refusing to launch without "
+                 "a rotation guard. Set it (docs/11) before launching.")
     try:
         ident = boto3.client("sts", region_name=REGION).get_caller_identity()
     except Exception as e:                      # noqa: BLE001
@@ -133,12 +139,16 @@ def launch(a) -> None:
     print(f"uploading bundle ({b.stat().st_size // 1_000_000} MB, {len(pairs)} files)...")
     s3.upload_file(str(b), BUCKET, bundle_key)
 
-    def _presign(method, key, exp=28800):
+    def _presign(method, key, exp):
         op = "get_object" if method == "get" else "put_object"
         return s3.generate_presigned_url(op, Params={"Bucket": BUCKET, "Key": key},
                                          ExpiresIn=exp)
-    ud = build_userdata(_presign("get", bundle_key), _presign("put", weights_key),
-                        _presign("put", log_key))
+    # Weights/log PUTs are consumed at the END of training -- give them 24h so a
+    # long run can't lose its output to an expired URL (review #6). Bundle GET is
+    # fetched at boot, so 8h is plenty.
+    ud = build_userdata(_presign("get", bundle_key, 28800),
+                        _presign("put", weights_key, 86400),
+                        _presign("put", log_key, 86400))
     ec2 = boto3.client("ec2", region_name=REGION)
     r = ec2.run_instances(
         ImageId=AWS.get("ami"), InstanceType=AWS.get("instance_type", "g5.2xlarge"),

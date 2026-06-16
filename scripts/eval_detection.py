@@ -42,8 +42,9 @@ def _load_detector(a):
 def _print_summary(res: dict) -> None:
     bar = "=" * 70
     print(bar)
+    failed = res.get("n_images_failed", 0)
     print(f"DETECTION EVAL  detector={res['detector']}  images={res['n_images']}  "
-          f"preds={res['n_predictions']}")
+          f"preds={res['n_predictions']}" + (f"  FAILED_LOADS={failed}" if failed else ""))
     print(bar)
     o = res["overall"]
     print(f"  overall   mAP@50={o['mAP_50']}  mAP@[50:95]={o['mAP_50_95']}  "

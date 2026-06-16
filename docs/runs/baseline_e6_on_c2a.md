@@ -5,10 +5,15 @@ the existing `e6_rfdetr_best.pth` (RF-DETR-**nano**, trained on e6 player/refere
 evaluated by `scripts/eval_detection.py` on the **c2a354fe** held-out game (1200
 imgs, all 4 angles). Cross-game, never trained on c2a.
 
+Repro from a fresh clone (the eval JSON + dataset live in gitignored `data/`,
+`runs/` — rebuild them; baseline weights come from the sibling Training_frameworks):
 ```
+pip install -e '.[baseline]'
+python scripts/build_detection_dataset.py          # build data/detect_consolidated
 python scripts/eval_detection.py --detector rfdetr \
   --weights "../Training_frameworks/Uball E6 Demo/runs/e6_rfdetr_best.pth" \
-  --model nano --resolution 1280 --threshold 0.25 --split test
+  --model nano --resolution 1280 --threshold 0.25 --split test \
+  --out runs/eval/detection_rfdetr_e6_on_c2a_test.json
 ```
 
 ## Numbers (runs/eval/detection_rfdetr_e6_on_c2a_test.json)

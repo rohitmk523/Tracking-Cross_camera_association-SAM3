@@ -50,12 +50,14 @@ split_map:
   e6fba750: train
   c2a354fe: test
 
-# val_mode:
-#   held_out_game  -> val == test game (cross-game early-stop signal; val==test,
-#                     matches the proven 4Cam setup; transparent caveat).
+# val_mode (default temporal_holdout, per review): keep the held-out TEST game
+# (c2a, docs/14) truly untouched -- never use it for early-stopping.
 #   temporal_holdout -> carve `val_fraction` of the train game (by frame order,
-#                     per angle) as an in-domain val; test stays clean.
-val_mode: held_out_game
+#                     per angle) as an in-domain val; TEST stays clean.  <-- default
+#   held_out_game  -> val == test game. REJECTED as default: early-stopping would
+#                     select on the test set (review #5/#7). Use only if you
+#                     accept val==test and report it as such.
+val_mode: temporal_holdout
 val_fraction: 0.1
 
 keep_empty_frames: false     # drop frames with no target instance after remap

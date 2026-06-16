@@ -15,7 +15,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .provenance import ANGLES, GameInfo, parse_stem, resolve_game
+from .provenance import ANGLES, GameInfo, parse_stem, resolve_game, validate_aliases
 
 VALID_SPLITS = ("train", "valid", "test")
 
@@ -42,6 +42,9 @@ class BuildReport:
     sources_used: list[str] = field(default_factory=list)
     duplicates_skipped: int = 0
     frames_dropped_empty: int = 0
+    frames_unresolved: int = 0          # filename did not resolve to a known game
+    frames_off_split: int = 0           # resolved game not in split_map
+    unresolved_samples: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
 
@@ -83,11 +86,30 @@ def _remap_lines(label_path: Path, id_to_canonical: dict[int, int]) -> list[str]
     return out
 
 
+def _validate_split_map(split_map: dict[str, str], games: dict[str, GameInfo]) -> None:
+    """split_map must not silently diverge from games.json (review #4).
+
+    For any game whose games.json split is a canonical train/val/test, the
+    config's split must agree (val==valid). Raises on conflict so a typo can't
+    leak the held-out game into training.
+    """
+    norm = {"val": "valid"}
+    for gid8, sp in split_map.items():
+        gi = games.get(gid8)
+        if gi and gi.split in ("train", "val", "test"):
+            if norm.get(gi.split, gi.split) != norm.get(sp, sp):
+                raise ValueError(
+                    f"split_map[{gid8}]={sp!r} conflicts with games.json "
+                    f"split={gi.split!r} -- refuse to risk train/test contamination.")
+
+
 def collect_frames(cfg: dict, tf_root: Path,
                    games: dict[str, GameInfo]) -> tuple[list[FrameItem], BuildReport]:
     target = list(cfg["target_classes"])
     name_to_id = {n: i for i, n in enumerate(target)}
     split_map: dict[str, str] = dict(cfg["split_map"])
+    validate_aliases(games)
+    _validate_split_map(split_map, games)
     report = BuildReport(out_dir=cfg["out_dir"], target_classes=target,
                          val_mode=cfg["val_mode"], split_map=split_map)
 
@@ -109,20 +131,27 @@ def collect_frames(cfg: dict, tf_root: Path,
         for img, lab in _iter_source_frames(root):
             game_key, angle = parse_stem(img.stem)
             gi = resolve_game(game_key, games)
-            if gi is None or gi.gid8 not in split_map:
+            if gi is None:                          # OUR-DATA gate: account, don't hide
+                report.frames_unresolved += 1
+                if len(report.unresolved_samples) < 12:
+                    report.unresolved_samples.append(img.name)
+                continue
+            if gi.gid8 not in split_map:
+                report.frames_off_split += 1
                 continue
             split = split_map[gi.gid8]
             ftok = _frame_token(img.stem, angle)
             key = (gi.gid8, angle, ftok)
-            if key in seen:
+            # A dedup collision only matters once a REAL item has claimed the key;
+            # an empty/dropped frame must never block a good lower-priority frame.
+            if key in items:
                 report.duplicates_skipped += 1
                 if prio >= seen[key]:
-                    continue                       # keep the higher-priority one
+                    continue                        # keep the higher-priority item
             lines = _remap_lines(lab, id_to_canonical)
             if not lines and not cfg.get("keep_empty_frames"):
                 report.frames_dropped_empty += 1
-                seen.setdefault(key, prio)
-                continue
+                continue                            # do NOT claim the key
             seen[key] = prio
             inst = tuple(int(ln.split()[0]) for ln in lines)
             ang = angle if angle in ANGLES else None
@@ -217,7 +246,8 @@ def build(cfg: dict, tf_root: Path, games: dict[str, GameInfo],
                 dst_img.symlink_to(it.src_image.resolve())
             else:
                 shutil.copy2(it.src_image, dst_img)
-        dst_lab.write_text("\n".join(it.lines) + "\n")
+        # YOLO negative samples are an EMPTY file, never a blank line (review #13).
+        dst_lab.write_text(("\n".join(it.lines) + "\n") if it.lines else "")
 
     # data.yaml (RF-DETR YOLO format)
     names = "\n".join(f"  {i}: {n}" for i, n in enumerate(report.target_classes))

@@ -52,16 +52,31 @@ def parse_stem(stem: str) -> tuple[str, str | None]:
     return game_key, angle
 
 
+# Shortest key allowed to prefix-match a gid8. Below this, ambiguity is too
+# likely (e.g. 'cc' matches both cc5deb39 and cc1710c4) -> force such names
+# through the explicit ALIASES map instead (review #14).
+_MIN_PREFIX_LEN = 3
+
+
 def resolve_game(game_key: str, games: dict[str, GameInfo]) -> GameInfo | None:
-    """Resolve a frame's game key to a known game (gid8). None if unknown."""
+    """Resolve a frame's game key to a known game (gid8). None if unknown/ambiguous."""
     key = ALIASES.get(game_key, game_key)
     if key in games:
         return games[key]
-    # gid8-prefix match (e.g. legacy 'e6'/'c2a' before aliasing, or truncations)
+    if len(key) < _MIN_PREFIX_LEN:
+        return None
+    # gid8-prefix match (e.g. legacy 'c2a', or truncations). Ambiguous -> None.
     cands = [g for gid8, g in games.items() if gid8.startswith(key)]
-    if len(cands) == 1:
-        return cands[0]
-    return None
+    return cands[0] if len(cands) == 1 else None
+
+
+def validate_aliases(games: dict[str, GameInfo]) -> None:
+    """Every ALIASES target must be a real game (review #15) -- a stale alias
+    would misattribute every frame of a game into the wrong split silently."""
+    bad = {k: v for k, v in ALIASES.items() if v not in games}
+    if bad:
+        raise ValueError(f"ALIASES point to unknown gid8(s): {bad} -- "
+                         "fix uball_cc.data.provenance.ALIASES or configs/games.json.")
 
 
 _STEM_RE = re.compile(r"\.(jpg|jpeg|png)$", re.IGNORECASE)

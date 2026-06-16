@@ -9,10 +9,12 @@ D1–2 gates (acceptance: *"a confirmed plan for the first RF-DETR training run"
 - **Resolution:** **1280** (ball ≈13 px at the far endline; 640 is a non-starter).
 - **Classes:** `player, referee, ball` (canonical 0/1/2).
 - **Data (OURS ONLY):** `data/detect_consolidated` — built by
-  `scripts/build_detection_dataset.py` from the 4Cam set.
-  - train = **e6fba750** · 1175 imgs (7153 player / 475 ref / **0 ball**)
-  - valid = test = **c2a354fe** (held-out per docs/14) · 1200 imgs (9906 / 220 / 0)
-- **Epochs:** 60, batch 8, grad-accum 2, early-stop patience 12 (on cross-game val mAP).
+  `scripts/build_detection_dataset.py` from the 4Cam set (`val_mode=temporal_holdout`).
+  - train = **e6fba750** (90%) · 1058 imgs (6389 player / 428 ref / **0 ball**)
+  - valid = **e6fba750** (10% temporal tail) · 117 imgs (in-domain, for early-stop)
+  - test  = **c2a354fe** (held-out per docs/14, untouched) · 1200 imgs (9906 / 220 / 0)
+- **Epochs:** 60, batch 8, grad-accum 2, early-stop patience 12 (on the in-domain
+  val tail; the held-out c2a test is never used for model selection).
 
 ## How to launch
 ```bash
@@ -47,9 +49,9 @@ headline). Beat the baseline, with the band recall as the figure of merit (docs/
 1. **`ball` = 0 instances** — the consolidated set has no ball labels. The model
    cannot learn ball from this data; **annotate ball** (priority batch, docs/10)
    before relying on ball detection. Train run still valid for player/ref.
-2. **val == test** (single held-out game c2a). Early-stop uses the held-out game;
-   reported test == val. **Annotate a 3rd game** (from the *fresh* set) to separate
-   them (`configs/detection_dataset.yaml` → `split_map`, one-line change).
+2. **No cross-court val yet** — val is an in-domain temporal tail of e6 (clean
+   early-stopping; c2a stays a true held-out test). **Annotate a 3rd game** (from
+   the *fresh* set) for a real cross-game val (`split_map`, one-line change).
 3. **SAHI** (docs/04, biggest far-endline lever) is scaffolded
    (`configs/train_rfdetr.yaml: sahi`) but OFF for run 1 — measure the plain @1280
    baseline first, then add sliced fine-tune + far-endline-ROI sliced inference.
