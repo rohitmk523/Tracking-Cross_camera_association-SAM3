@@ -1,0 +1,63 @@
+# Consolidation policy for the player/referee/ball detection dataset (docs/04).
+# OUR FOOTAGE ONLY. Read by scripts/build_detection_dataset.py.
+#
+# Canonical taxonomy (output YOLO ids): 0=player, 1=referee, 2=ball.
+target_classes: [player, referee, ball]
+
+# ---------------------------------------------------------------------------
+# Sources. `class_map` remaps each source's raw YOLO class id -> canonical name
+# (null = drop that id). Only `include: true` sources are consolidated.
+# ---------------------------------------------------------------------------
+sources:
+  - name: 4cam_detection            # authoritative cross-game player/ref/ball set
+    path: "Uball 4Cam Detection/data"
+    include: true
+    priority: 0                     # lower wins on duplicate frames
+    class_map: {0: player, 1: referee, 2: ball}
+
+  # e6-only, redundant with 4Cam's e6 frames, and carries an unnamed/ambiguous
+  # cls2 (not confirmed as ball -> NOT mapped). Off by default; enable only after
+  # verifying cls2 and deduping against 4Cam.
+  - name: e6_demo
+    path: "Uball E6 Demo/data"
+    include: false
+    priority: 1
+    class_map: {0: player, 1: referee}     # cls2 dropped (ambiguous)
+
+  - name: e6_perfect
+    path: "Uball E6 Demo/data_perfect"
+    include: false
+    priority: 2
+    class_map: {0: player, 1: referee}     # cls2 dropped (ambiguous); yaml empty
+
+  # Far/Near Angle are a DIFFERENT task (Basketball/Hoop = shot detection),
+  # not player/referee. Never folded into this set (partial labels would teach
+  # "no players here"). Kept for the separate shot-detection model.
+  - name: far_angle_rim
+    path: "Uball Far Angle/data_rfdetr"
+    include: false
+  - name: near_angle_rim
+    path: "Uball Near Angle/data/yolo_split"
+    include: false
+
+# ---------------------------------------------------------------------------
+# Cross-game splits (whole-game discipline; never random-frame). Maps gid8 ->
+# split. Only games listed here are emitted. Default holds c2a354fe per docs/14.
+# (All current footage is court-a -> this is a cross-GAME, not yet cross-COURT,
+# split. Annotate a 3rd game from the "fresh" set to make val != test.)
+# ---------------------------------------------------------------------------
+split_map:
+  e6fba750: train
+  c2a354fe: test
+
+# val_mode:
+#   held_out_game  -> val == test game (cross-game early-stop signal; val==test,
+#                     matches the proven 4Cam setup; transparent caveat).
+#   temporal_holdout -> carve `val_fraction` of the train game (by frame order,
+#                     per angle) as an in-domain val; test stays clean.
+val_mode: held_out_game
+val_fraction: 0.1
+
+keep_empty_frames: false     # drop frames with no target instance after remap
+image_mode: copy             # copy | symlink (copy = self-contained for AWS bundle)
+out_dir: data/detect_consolidated
