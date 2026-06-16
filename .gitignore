@@ -1,0 +1,43 @@
+# --- secrets / credentials (NEVER commit) ---
+.env
+.env.*
+!.env.example
+.aws_local/
+**/credentials
+*.pem
+*_secret*
+*_key*.json
+
+# --- python ---
+__pycache__/
+*.py[cod]
+.venv/
+.venv_*/
+venv/
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# --- ML weights / large artifacts (tracked via DVC/S3, not git) ---
+*.pt
+*.pth
+*.onnx
+*.engine
+*.npy
+*.npz
+*.pkl
+
+# --- data / media / runs ---
+data/
+runs/
+_segcache/
+_dumps/
+*.mp4
+*.mov
+*.jpg
+*.jpeg
+*.png
+!docs/**/*.png
+
+# --- os ---
+.DS_Store
