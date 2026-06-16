@@ -25,21 +25,28 @@ python scripts/eval_detection.py --detector rfdetr \
 | player mAP@[50:95] | 0.671 | |
 | player **AP_small** (COCO) | **0.000** | tiniest objects are missed — the far-endline problem |
 | **referee** mAP@50 | **0.007** | referee detection collapses cross-game ❌ |
-| ball | n/a (-1) | no ball GT / no ball in model |
-| **far-endline band** player recall@0.5 | **0.745** | smallest-quartile players |
-| — FL | 0.518 | far cam, weak |
-| — **FR** | **0.063** | far cam, near-total miss ⚠️ |
-| — NL | 0.817 | near cam, strong |
-| — NR | 0.760 | near cam |
+| ball | n/a | no ball GT / no ball in model (reported as None) |
+| **far-endline band** player recall@0.5 | **0.774** | smallest-quartile players |
+| — FL | 0.597 | far cam, weak |
+| — **FR** | **0.234** | far cam, weakest angle |
+| — NL | 0.835 | near cam, strong |
+| — NR | 0.780 | near cam |
+
+> Band-recall numbers are **post-fix** (review #1): the pre-fix harness filtered
+> predictions to the band before matching, deflating recall (overall 0.745, and
+> FR 0.063 — most of that "FR near-total miss" was a measurement artifact, since
+> the e6 detector predicts slightly over-sized boxes on FR that the buggy metric
+> discarded). Corrected: overall 0.774, FR 0.234.
 
 ## What this tells the first training run
 1. **Player generalizes** (78.7 mAP@50 cross-game) — RF-DETR-S @1280 should push higher.
 2. **Referee is broken cross-game** (0.7 mAP@50). Root cause likely too few/!consistent
-   ref labels (e6 train = 475 ref). **Add referee data** + check player/ref confusion.
+   ref labels (e6 train = 428 ref). **Add referee data** + check player/ref confusion.
 3. **Small / far-endline players are the headline gap**: AP_small=0 and far-cam band
-   recall is 6% (FR) / 52% (FL). This is the quantified justification for **SAHI +
-   far-endline-ROI tiling + targeted endline data** (docs/04). The FR=6% vs FL=52%
-   asymmetry warrants a look (FR coverage/calibration vs genuine geometry).
+   recall is 23% (FR) / 60% (FL) vs 78-84% on the near cams. This is the quantified
+   justification for **SAHI + far-endline-ROI tiling + targeted endline data**
+   (docs/04). FR is genuinely the weakest angle (not the artifactual 6%) — far-right
+   small players are the hardest case to close.
 4. ball=0 everywhere (no labels) — unmeasurable until annotated.
 
 > Targets for run 1 (RF-DETR-S @1280, e6→c2a): beat player mAP@50 0.787 and — the
