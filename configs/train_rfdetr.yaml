@@ -1,0 +1,31 @@
+# RF-DETR detection training config (docs/04). OUR FOOTAGE ONLY.
+# Consumed by scripts/train_rfdetr.py (runs on the AWS instance or local MPS).
+model: small              # RF-DETR-Small (docs/02); 'nano' for a fast local MPS smoke
+resolution: 1280          # must be /32; ball ~13px at far endline -> 640 is a non-starter
+epochs: 60
+batch_size: 8
+grad_accum: 2
+early_stopping: true
+early_stopping_patience: 12
+class_names: [player, referee, ball]
+dataset: data/detect_consolidated      # built by scripts/build_detection_dataset.py
+run_name: rfdetr-s-1280-ourdata-v1
+
+# SAHI (docs/04, the biggest far-endline lever). Two uses:
+#   - sliced FINE-TUNE: pre-slice the dataset into tiles (data prep, follow-up).
+#   - sliced INFERENCE on the fixed far-endline ROI band only (keeps latency sane).
+sahi:
+  enabled: false          # turn on after the plain @1280 baseline is measured
+  slice: [512, 512]
+  overlap: 0.2
+  roi_only: true          # slice only the far-endline ROI, not the whole frame
+
+# AWS launch (scripts/aws_train.py). Creds come from ~/.aws / env -- NEVER here.
+aws:
+  region: us-east-1
+  instance_type: g5.2xlarge      # g5/g6; 2xlarge gives headroom for small@1280
+  ami: ami-012ba162b9cd2729c     # DL AMI (PyTorch+CUDA), us-east-1 -- VERIFY before launch
+  volume_gb: 120
+  s3_bucket: uball-videos-production
+  s3_prefix: _tmp_rfdetr_train
+  flagged_account: "840102831548"   # keys flagged for ROTATION (docs/11) -> guard
