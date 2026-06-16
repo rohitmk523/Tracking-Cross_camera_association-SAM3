@@ -26,30 +26,40 @@ from pathlib import Path
 import yaml
 
 REPO = Path(__file__).resolve().parents[1]
-CFG = yaml.safe_load((REPO / "configs" / "train_rfdetr.yaml").read_text())
-AWS = CFG.get("aws", {})
-REGION = AWS.get("region", "us-east-1")
-BUCKET = AWS.get("s3_bucket", "uball-videos-production")
-PREFIX = AWS.get("s3_prefix", "_tmp_rfdetr_train")
-DATASET = REPO / CFG.get("dataset", "data/detect_consolidated")
 
 
-def _bundle_files() -> list[tuple[Path, str]]:
+class Ctx:
+    """Everything derived from the chosen training config (one per run task)."""
+
+    def __init__(self, config_path: Path):
+        self.config_path = config_path
+        self.config_name = config_path.name
+        self.cfg = yaml.safe_load(config_path.read_text())
+        self.aws = self.cfg.get("aws", {})
+        self.region = self.aws.get("region", "us-east-1")
+        self.bucket = self.aws.get("s3_bucket", "uball-videos-production")
+        self.prefix = self.aws.get("s3_prefix", "_tmp_rfdetr_train")
+        ds = self.cfg.get("dataset", "data/detect_consolidated")
+        self.dataset = Path(ds) if Path(ds).is_absolute() else REPO / ds
+
+
+def _bundle_files(ctx: Ctx) -> list[tuple[Path, str]]:
     """(*src*, *arcname*) pairs placing everything under the instance's /work."""
+    ds = ctx.dataset
     pairs = [
         (REPO / "scripts" / "train_rfdetr.py", "scripts/train_rfdetr.py"),
-        (REPO / "configs" / "train_rfdetr.yaml", "configs/train_rfdetr.yaml"),
-        (DATASET / "data.yaml", f"{DATASET.name}-as-data/data.yaml"),
+        (ctx.config_path, f"configs/{ctx.config_name}"),
+        (ds / "data.yaml", f"{ds.name}-as-data/data.yaml"),
     ]
-    base = f"{DATASET.name}-as-data"
+    base = f"{ds.name}-as-data"
     for split in ("train", "valid"):                # test recreated on instance
         for sub in ("images", "labels"):
-            d = DATASET / split / sub
+            d = ds / split / sub
             if d.is_dir():
                 for p in sorted(d.iterdir()):
                     # Resolve symlinks so the REAL file content is bundled -- a bare
                     # is_symlink skip would silently ship an EMPTY dataset when the
-                    # consolidation used image_mode=symlink (review #9).
+                    # dataset dir uses symlinks (review #9).
                     if p.is_file():            # is_file() follows symlinks
                         pairs.append((p.resolve(), f"{base}/{split}/{sub}/{p.name}"))
     return pairs
@@ -63,9 +73,10 @@ def bundle(pairs: list[tuple[Path, str]]) -> Path:
     return tmp
 
 
-def build_userdata(bundle_url: str, weights_url: str, log_url: str) -> str:
-    res, model = CFG.get("resolution", 1280), CFG.get("model", "small")
-    run = CFG.get("run_name", "rfdetr-s-1280-ourdata-v1")
+def build_userdata(ctx: Ctx, bundle_url: str, weights_url: str, log_url: str) -> str:
+    res, model = ctx.cfg.get("resolution", 1280), ctx.cfg.get("model", "small")
+    run = ctx.cfg.get("run_name", "rfdetr-s-1280-ourdata-v1")
+    dsname = ctx.dataset.name
     return f"""#!/bin/bash
 exec > /var/log/train.log 2>&1
 export HOME=/root PYTHONUNBUFFERED=1
@@ -83,13 +94,13 @@ $PYBIN -m pip uninstall -y transformer_engine >/dev/null 2>&1 || true
 mkdir -p /work && cd /work
 curl -s -L "{bundle_url}" -o b.tgz && tar xzf b.tgz
 # Restore the dataset dir name the config expects + recreate the test symlink.
-mv {DATASET.name}-as-data data/{DATASET.name} 2>/dev/null || (mkdir -p data && mv {DATASET.name}-as-data data/{DATASET.name})
-mkdir -p data/{DATASET.name}/test
-ln -sf ../valid/images data/{DATASET.name}/test/images
-ln -sf ../valid/labels data/{DATASET.name}/test/labels
+mv {dsname}-as-data data/{dsname} 2>/dev/null || (mkdir -p data && mv {dsname}-as-data data/{dsname})
+mkdir -p data/{dsname}/test
+ln -sf ../valid/images data/{dsname}/test/images
+ln -sf ../valid/labels data/{dsname}/test/labels
 nvidia-smi || true
 echo "[boot] train RF-DETR-{model} @{res}  run={run}"
-$PYBIN scripts/train_rfdetr.py --config configs/train_rfdetr.yaml
+$PYBIN scripts/train_rfdetr.py --config configs/{ctx.config_name}
 echo "[boot] train exit=$?"; sync
 BEST=$(ls -t /work/runs/*/checkpoint_best_ema.pth /work/runs/*/checkpoint_best*.pth /work/runs/*/*.pth 2>/dev/null | head -1)
 echo "[boot] best=$BEST"
@@ -106,16 +117,16 @@ sleep 5; shutdown -h now
 """
 
 
-def _guard_rotation(a) -> None:
+def _guard_rotation(ctx: Ctx, a) -> None:
     """Refuse to spend AWS on un-rotated, flagged credentials (docs/11)."""
     import boto3
-    flagged = str(AWS.get("flagged_account", "")).strip()
+    flagged = str(ctx.aws.get("flagged_account", "")).strip()
     confirmed = a.i_rotated_creds or os.environ.get("UBALL_AWS_CREDS_ROTATED") == "1"
     if not flagged:                              # fail CLOSED (review #16)
         sys.exit("config aws.flagged_account is empty -- refusing to launch without "
                  "a rotation guard. Set it (docs/11) before launching.")
     try:
-        ident = boto3.client("sts", region_name=REGION).get_caller_identity()
+        ident = boto3.client("sts", region_name=ctx.region).get_caller_identity()
     except Exception as e:                      # noqa: BLE001
         sys.exit(f"AWS credentials not usable ({e}). Configure ~/.aws or .env first.")
     account = ident.get("Account", "?")
@@ -127,89 +138,99 @@ def _guard_rotation(a) -> None:
             "UBALL_AWS_CREDS_ROTATED=1). Never commit the new keys.")
 
 
-def launch(a) -> None:
+def launch(ctx: Ctx, a) -> None:
     import boto3
-    _guard_rotation(a)
-    pairs = _bundle_files()
+    _guard_rotation(ctx, a)
+    weights_key_name = a.weights_key or f"{ctx.cfg.get('run_name', 'rfdetr')}_best.pth"
+    pairs = _bundle_files(ctx)
     b = bundle(pairs)
-    s3 = boto3.client("s3", region_name=REGION)
-    weights_key = f"{PREFIX}/{a.weights_key}"
-    bundle_key = f"{PREFIX}/{a.weights_key.replace('.pth', '_bundle.tar.gz')}"
-    log_key = f"{PREFIX}/{a.weights_key.replace('.pth', '_train.log')}"
+    s3 = boto3.client("s3", region_name=ctx.region)
+    weights_key = f"{ctx.prefix}/{weights_key_name}"
+    bundle_key = f"{ctx.prefix}/{weights_key_name.replace('.pth', '_bundle.tar.gz')}"
+    log_key = f"{ctx.prefix}/{weights_key_name.replace('.pth', '_train.log')}"
     print(f"uploading bundle ({b.stat().st_size // 1_000_000} MB, {len(pairs)} files)...")
-    s3.upload_file(str(b), BUCKET, bundle_key)
+    s3.upload_file(str(b), ctx.bucket, bundle_key)
 
     def _presign(method, key, exp):
         op = "get_object" if method == "get" else "put_object"
-        return s3.generate_presigned_url(op, Params={"Bucket": BUCKET, "Key": key},
+        return s3.generate_presigned_url(op, Params={"Bucket": ctx.bucket, "Key": key},
                                          ExpiresIn=exp)
     # Weights/log PUTs are consumed at the END of training -- give them 24h so a
     # long run can't lose its output to an expired URL (review #6). Bundle GET is
     # fetched at boot, so 8h is plenty.
-    ud = build_userdata(_presign("get", bundle_key, 28800),
+    ud = build_userdata(ctx, _presign("get", bundle_key, 28800),
                         _presign("put", weights_key, 86400),
                         _presign("put", log_key, 86400))
-    ec2 = boto3.client("ec2", region_name=REGION)
+    ec2 = boto3.client("ec2", region_name=ctx.region)
     r = ec2.run_instances(
-        ImageId=AWS.get("ami"), InstanceType=AWS.get("instance_type", "g5.2xlarge"),
+        ImageId=ctx.aws.get("ami"), InstanceType=ctx.aws.get("instance_type", "g5.2xlarge"),
         MinCount=1, MaxCount=1, InstanceInitiatedShutdownBehavior="terminate",
         BlockDeviceMappings=[{"DeviceName": "/dev/sda1",
-                              "Ebs": {"VolumeSize": AWS.get("volume_gb", 120),
+                              "Ebs": {"VolumeSize": ctx.aws.get("volume_gb", 120),
                                       "VolumeType": "gp3", "DeleteOnTermination": True}}],
         UserData=ud,
         TagSpecifications=[{"ResourceType": "instance",
-                            "Tags": [{"Key": "Name", "Value": "uball-rfdetr-train"}]}])
+                            "Tags": [{"Key": "Name",
+                                      "Value": f"uball-rfdetr-{ctx.cfg.get('run_name','train')}"}]}])
     iid = r["Instances"][0]["InstanceId"]
-    print(f"launched {iid}  ({AWS.get('instance_type')}, RF-DETR-{CFG.get('model')})")
-    print(f"watch:  aws s3 cp s3://{BUCKET}/{log_key} -")
-    print(f"weights land: s3://{BUCKET}/{weights_key}  (fetch with --fetch)")
+    print(f"launched {iid}  ({ctx.aws.get('instance_type')}, RF-DETR-{ctx.cfg.get('model')}, "
+          f"run={ctx.cfg.get('run_name')})")
+    print(f"watch:  aws s3 cp s3://{ctx.bucket}/{log_key} -")
+    print(f"weights land: s3://{ctx.bucket}/{weights_key}  (fetch with "
+          f"--config {ctx.config_name} --fetch)")
 
 
-def dry_run() -> None:
-    pairs = _bundle_files()
+def dry_run(ctx: Ctx) -> None:
+    pairs = _bundle_files(ctx)
     n_img = sum(1 for _, a in pairs if "/images/" in a)
     n_lab = sum(1 for _, a in pairs if "/labels/" in a)
     size_mb = sum(s.stat().st_size for s, _ in pairs) // 1_000_000
-    print("DRY RUN -- no AWS calls.")
-    print(f"  dataset:       {DATASET}")
+    print(f"DRY RUN ({ctx.config_name}) -- no AWS calls.")
+    print(f"  dataset:       {ctx.dataset}")
     print(f"  bundle files:  {len(pairs)}  ({n_img} images, {n_lab} labels)")
     print(f"  bundle size:   ~{size_mb} MB (uncompressed)")
-    print(f"  model:         RF-DETR-{CFG.get('model')} @ {CFG.get('resolution')}  "
-          f"epochs={CFG.get('epochs')} batch={CFG.get('batch_size')}")
-    print(f"  instance:      {AWS.get('instance_type')}  ami={AWS.get('ami')}  "
-          f"region={REGION}")
-    print(f"  s3:            s3://{BUCKET}/{PREFIX}/")
-    print(f"  rotation guard: blocks launch on account {AWS.get('flagged_account')} "
+    print(f"  model:         RF-DETR-{ctx.cfg.get('model')} @ {ctx.cfg.get('resolution')}  "
+          f"epochs={ctx.cfg.get('epochs')} batch={ctx.cfg.get('batch_size')}  "
+          f"classes={ctx.cfg.get('class_names')}")
+    print(f"  instance:      {ctx.aws.get('instance_type')}  ami={ctx.aws.get('ami')}  "
+          f"region={ctx.region}")
+    print(f"  s3:            s3://{ctx.bucket}/{ctx.prefix}/")
+    print(f"  rotation guard: blocks launch on account {ctx.aws.get('flagged_account')} "
           "unless --i-rotated-creds / UBALL_AWS_CREDS_ROTATED=1")
-    if not (DATASET / "data.yaml").exists():
-        print("  WARNING: dataset not built -- run scripts/build_detection_dataset.py")
+    if not (ctx.dataset / "data.yaml").exists():
+        print(f"  WARNING: dataset not built at {ctx.dataset}")
 
 
-def fetch(a) -> None:
+def fetch(ctx: Ctx, a) -> None:
     import boto3
-    out = Path(a.out)
+    weights_key_name = a.weights_key or f"{ctx.cfg.get('run_name', 'rfdetr')}_best.pth"
+    out = Path(a.out) if a.out else (REPO / "runs" / ctx.cfg.get("run_name", "rfdetr")
+                                     / "best.pth")
     out.parent.mkdir(parents=True, exist_ok=True)
-    boto3.client("s3", region_name=REGION).download_file(
-        BUCKET, f"{PREFIX}/{a.weights_key}", str(out))
+    boto3.client("s3", region_name=ctx.region).download_file(
+        ctx.bucket, f"{ctx.prefix}/{weights_key_name}", str(out))
     print(f"downloaded -> {out}")
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--config", default=str(REPO / "configs" / "train_rfdetr.yaml"),
+                    help="training config (selects dataset/model/classes/run-name)")
     ap.add_argument("--dry-run", action="store_true", help="verify bundle+plan, no AWS")
     ap.add_argument("--fetch", action="store_true")
     ap.add_argument("--i-rotated-creds", action="store_true",
                     help="confirm the flagged AWS keys were rotated (docs/11)")
-    ap.add_argument("--weights-key", default="rfdetr_s_1280_ourdata_v1_best.pth")
-    ap.add_argument("--out", default=str(REPO / "runs" / "rfdetr_s_1280_ourdata_v1"
-                                         / "best.pth"))
+    ap.add_argument("--weights-key", default=None,
+                    help="S3 weights filename (default <run_name>_best.pth)")
+    ap.add_argument("--out", default=None)
     a = ap.parse_args()
+    ctx = Ctx(Path(a.config))
     if a.dry_run:
-        dry_run()
+        dry_run(ctx)
     elif a.fetch:
-        fetch(a)
+        fetch(ctx, a)
     else:
-        launch(a)
+        launch(ctx, a)
     return 0
 
 

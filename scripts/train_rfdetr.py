@@ -30,6 +30,7 @@ def main() -> int:
     ap.add_argument("--grad-accum", type=int)
     ap.add_argument("--dataset")
     ap.add_argument("--run-name")
+    ap.add_argument("--class-names", help="comma-separated; overrides config")
     a = ap.parse_args()
 
     cfg = yaml.safe_load(Path(a.config).read_text()) if Path(a.config).exists() else {}
@@ -38,7 +39,8 @@ def main() -> int:
     resolution = a.resolution or cfg.get("resolution", 1280)
     batch_size = a.batch_size or cfg.get("batch_size", 8)
     grad_accum = a.grad_accum or cfg.get("grad_accum", 2)
-    class_names = list(cfg.get("class_names", ["player", "referee", "ball"]))
+    class_names = ([c.strip() for c in a.class_names.split(",")] if a.class_names
+                   else list(cfg.get("class_names", ["player", "referee", "ball"])))
     dataset = Path(a.dataset or cfg.get("dataset", "data/detect_consolidated"))
     if not dataset.is_absolute():
         dataset = REPO / dataset

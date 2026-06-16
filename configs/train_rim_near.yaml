@@ -1,0 +1,25 @@
+# RF-DETR NEAR-angle ball+hoop detector (replaces the AGPL YOLO near model).
+# OUR footage; YOLO label format (no ultralytics). Data: scripts/prep_rim_datasets.py
+# Near cams are GoPro SuperView (non-rectilinear) -> a separate model from far.
+model: small
+resolution: 1280
+epochs: 60
+batch_size: 8
+grad_accum: 2
+early_stopping: true
+early_stopping_patience: 12
+class_names: [Basketball, Basketball Hoop]
+dataset: data/rim_near      # near yolo_split, whole-game holdout (val=9eb51980)
+run_name: rfdetr-rim-near-v1
+
+sahi:
+  enabled: false
+
+aws:
+  region: us-east-1
+  instance_type: g5.2xlarge
+  ami: ami-012ba162b9cd2729c     # DL AMI (PyTorch+CUDA), us-east-1 -- VERIFY before launch
+  volume_gb: 120
+  s3_bucket: uball-videos-production
+  s3_prefix: _tmp_rfdetr_train
+  flagged_account: "840102831548"
