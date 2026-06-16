@@ -1,0 +1,18 @@
+# Far/small-player band for detection eval (docs/04, docs/13) -- "the metric that
+# matters most" is player recall on the far-endline small players.
+#
+# An image-space y-band is a POOR proxy: the far cams (FL/FR) view the far endline
+# mid/lower-frame, not at the top (verified on c2a GT). So the DEFAULT band is
+# SIZE-based -- the smallest `small_box_percentile`% of player boxes by height,
+# which tracks "far endline small players" without needing court calibration.
+# Switch to `y_band` once per-court homographies define a real court ROI (docs/03).
+band_mode: small_box_percentile     # small_box_percentile | small_box_px | y_band
+small_box_percentile: 25            # smallest 25% of player boxes by height
+small_box_h_px: 130                 # used when band_mode = small_box_px
+y_band:                             # used when band_mode = y_band (needs calibration)
+  default: [0.0, 0.45]
+  per_angle:
+    FL: [0.0, 0.45]
+    FR: [0.0, 0.45]
+    NL: [0.0, 0.40]
+    NR: [0.0, 0.40]
