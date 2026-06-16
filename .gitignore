@@ -27,11 +27,11 @@ venv/
 *.npz
 *.pkl
 
-# --- data / media / runs ---
-data/
-runs/
-_segcache/
-_dumps/
+# --- data / media / runs (repo-root only; must NOT match src/uball_cc/data/) ---
+/data/
+/runs/
+/_segcache/
+/_dumps/
 *.mp4
 *.mov
 *.jpg
