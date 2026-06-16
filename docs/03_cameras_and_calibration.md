@@ -36,9 +36,12 @@ step**, not per-frame. Two-tier approach:
    landmark markers onto the live frame (with a loupe magnifier), exports image↔court point
    pairs → `cv2.findHomography` (RANSAC) → `{CAM}_H.npy`. (Port the DEMO_UBALL
    `calibrate.html` + `compute_calib.py` tools.)
-2. **Court-keypoint model** (speed-up): fine-tune a court-keypoint detector on Roboflow
-   **CC-BY** basketball-court-keypoint datasets; auto-detect court landmarks per venue, then
-   the operator only confirms/nudges. Reduces onboarding from many clicks to a few.
+2. **Court-keypoint model** (speed-up): a court-landmark detector trained on **our own**
+   per-court landmark annotations (we annotate court points for calibration anyway, so this
+   data comes for free); auto-detect landmarks per venue, then the operator only
+   confirms/nudges. Reduces onboarding from many clicks to a few. *(Per the our-data-only
+   rule, no third-party/NBA court datasets in the shipped model — at most a throwaway
+   cold-start init, fine-tuned on ours.)*
 
 Calibration outputs per court: `configs/courts/<court_id>/{FL,FR,NL,NR}_H.npy` + a court
 metadata file (dimensions, zone ownership). The pipeline loads by `court_id`.

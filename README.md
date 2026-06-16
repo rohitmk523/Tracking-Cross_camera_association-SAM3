@@ -29,6 +29,7 @@ Full architecture and plan live in [`docs/`](docs/):
 | [11_edge_deployment](docs/11_edge_deployment.md) | Jetson, TensorRT, hybrid edge+cloud |
 | [12_roadmap](docs/12_roadmap.md) | ~3-week aggressive build plan |
 | [13_evaluation](docs/13_evaluation.md) | Metrics + acceptance criteria |
+| [14_games_and_clips](docs/14_games_and_clips.md) | Which games/clips to pull (S3 + Supabase) |
 
 ## Status
 Pre-implementation. Docs/architecture locked; build begins per [12_roadmap](docs/12_roadmap.md).

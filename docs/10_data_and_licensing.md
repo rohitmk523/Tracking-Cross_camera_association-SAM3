@@ -1,24 +1,28 @@
 # 10 · Data & Licensing
 
-## Principle: segregate "train/ship" from "benchmark/research"
-Because we ship commercially, **weights that ship may only be trained on commercially-usable
-data.** Non-commercial / NDA datasets are powerful but **benchmark-and-method-validation only**
-— never in shipped weights.
+## Two rules
+1. **Train on OUR footage only** (operator decision). No COCO, no NBA/broadcast, no
+   third-party sports datasets in *training* — our fixed-camera domain is too different and
+   generic data hurts transfer. (Model **backbones** pretrained on general visual features —
+   DINOv2 for RF-DETR, etc. — are fine and unavoidable; that's representation pretraining, not
+   sports training data.)
+2. **Ship-clean**: weights ship only if trained on commercially-usable data. Our own footage
+   qualifies. Non-commercial/NDA datasets are **benchmark/method-validation only** — never in
+   shipped weights, and per rule 1 not in training at all.
 
-## Train (ship-clean)
+## Train (OUR data only)
 | Source | What | License | Use |
 |---|---|---|---|
-| **Operator's own footage + annotations** (`Training_frameworks/*`) | player/ref/ball boxes across games/courts (Far Angle, Near Angle, 4Cam, E6) | **ours** | Primary Phase-1 detection data (convert YOLO→RF-DETR/COCO) |
-| **Our jersey-number crops** | digit crops | ours | Jersey-ResNet (reuse + improve) |
-| Roboflow basketball sets | player/ball/hoop, court keypoints | **CC BY 4.0** (verify each) | Augment detection + court-keypoint model |
-| SpaceJam | action clips + 2D pose | MIT | Optional pose/action aux |
-| DeepSportradar-ReID | basketball player crops/IDs | Apache-2.0 (repo) | ReID fine-tune |
+| **Our 4-camera game footage + operator annotations** (`Training_frameworks/*` + new) | player/ref/ball boxes, court keypoints, across our games/courts | **ours** | The ONLY detection/keypoint training data |
+| **Our jersey-number crops** | digit crops from our footage | ours | Jersey-ResNet (reuse + improve) |
+| **Our player crops** (from our tracks) | identity crops | ours | ReID fine-tune (on our players) |
 
-> Action item: **verify the license of any third-party Roboflow subset** already mixed into
-> the existing `Training_frameworks` data before it enters a shipped model. The operator's own
-> game footage/annotations are clean.
+> If any third-party Roboflow/NBA subset was ever mixed into the existing
+> `Training_frameworks` folders, **exclude it** before training — ours only.
 
-## Benchmark / research only (NOT shipped)
+## Benchmark / method-validation only (NOT shipped, NOT trained on)
+These validate methods and let us read SOTA numbers; per rule 1 they are **never used to
+train our models** and per rule 2 never in shipped weights.
 | Source | What | License |
 |---|---|---|
 | **TrackID3x3** | indoor fixed-cam 3×3 basketball tracking (closest to our rig) | Apache-2.0 (data terms vary) |

@@ -27,21 +27,26 @@ levers, **ranked by impact** (do the top ones):
 > high-res + targeted endline data** — not a bigger model. More *targeted* data (endline
 > small players) matters; raw model size does not.
 
-## Data (Phase 1: reuse what we have)
-We **reuse the operator's already-annotated images in `Training_frameworks`** (the YOLO
-training sets — Far Angle, Near Angle, 4Cam, E6) by converting to RF-DETR/COCO format. This
-avoids a cold-start annotation effort.
-- Consolidate all annotated player/ref/ball frames across the existing frameworks into one
-  multi-court dataset.
-- **Cross-game / cross-court splits** (train on some games, validate on a held-out court) —
-  never random-frame splits (avoids leakage; the prior work confirmed whole-game splits
-  generalize).
-- **Expand later**: add far-endline small-player crops as the priority next batch
-  (operator-annotated). Target eventually ~1,000–1,500 frames / ~10k small instances for the
-  endline class, but start with existing data.
+## Data — OUR footage only (hard rule)
+**Train exclusively on our own 4-fixed-camera footage + operator annotations. Do NOT mix in
+COCO, NBA/broadcast, or any third-party sports dataset for training.** Our fixed-camera,
+specific-court, specific-angle domain is too different from broadcast/COCO imagery — generic
+data *hurts* transfer here, it doesn't help. (Caveat that is **not** a violation: the RF-DETR
+**DINOv2 backbone** is pretrained on general self-supervised visual features — that's generic
+*visual representation*, not sports/NBA data, and is unavoidable for any modern detector. The
+**detection training data is ours only.**)
 
-See [10_data_and_licensing](10_data_and_licensing.md) for license hygiene (operator's own
-footage/annotations are clean; verify any third-party Roboflow subsets before shipping).
+Phase 1 (reuse what we have):
+- **Reuse the operator's already-annotated images in `Training_frameworks`** (Far Angle, Near
+  Angle, 4Cam, E6 — our footage) converted to RF-DETR/COCO *format* (format ≠ dataset). If any
+  third-party Roboflow/NBA subset was ever mixed into those folders, **exclude it** — ours only.
+- Consolidate all annotated player/ref/ball frames into one multi-court dataset.
+- **Cross-game / cross-court splits** (held-out court for validation; see
+  [14_games_and_clips](14_games_and_clips.md)) — never random-frame splits.
+- **Expand later**: operator-annotated far-endline small-player crops as the priority next
+  batch (~1,000–1,500 frames / ~10k small instances eventually); start with existing data.
+
+See [10_data_and_licensing](10_data_and_licensing.md).
 
 ## Training
 - AWS GPU (RF-DETR does **not** train on Apple MPS — confirmed; CUDA only). g5/g6 instance,

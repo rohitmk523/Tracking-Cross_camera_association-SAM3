@@ -1,0 +1,524 @@
+{
+ "_note": "Working-set games for cross-camera tracking. Pull 4 angles per game.",
+ "bucket": "uball-videos-production",
+ "s3_path": "court-a/<date>/<game_id>/<date>_<game_id>_<ANGLE>.mp4  (ANGLE in FL,FR,NL,NR)",
+ "supabase_project": "mhbrsftxvxxtfgbajrlc",
+ "demo_clip_window": {
+  "t0_frame": 1400,
+  "dur_sec": 60,
+  "fps": 30,
+  "vf": "field=top,scale=1920:1080,fps=30"
+ },
+ "splits_source": "uball_shot_detection_dual_fusion_v2/data/games_manifest.json (whole-game)",
+ "working_games": [
+  {
+   "gid8": "13e1ffad",
+   "date": "2026-01-31",
+   "split": "train",
+   "shots": 122,
+   "plays": 206,
+   "team1": {
+    "name": "A Day in Miami",
+    "color": "Yellow",
+    "roster": 7
+   },
+   "team2": {
+    "name": "Premier Mtg (Elite)",
+    "color": "Black",
+    "roster": 8
+   },
+   "s3_prefix": "court-a/2026-01-31/13e1ffad-e08b-4e1e-84bf/"
+  },
+  {
+   "gid8": "e6fba750",
+   "date": "2026-03-18",
+   "split": "train",
+   "shots": 142,
+   "plays": 219,
+   "team1": {
+    "name": "Blessed & Highly Favored",
+    "color": "Blue",
+    "roster": 6
+   },
+   "team2": {
+    "name": "Miracle Leaf (+30)",
+    "color": "Green",
+    "roster": 8
+   },
+   "s3_prefix": "court-a/2026-03-18/e6fba750-596a-441d-b216/"
+  },
+  {
+   "gid8": "c2a354fe",
+   "date": "2026-03-19",
+   "split": "test",
+   "shots": 189,
+   "plays": 315,
+   "team1": {
+    "name": "Uptown 66ers",
+    "color": "Black",
+    "roster": 10
+   },
+   "team2": {
+    "name": "Los Mananeros",
+    "color": "#ffffff",
+    "roster": 9
+   },
+   "s3_prefix": "court-a/2026-03-19/c2a354fe-eb34-4980-af00/"
+  },
+  {
+   "gid8": "ee8745f1",
+   "date": "2026-04-16",
+   "split": "test",
+   "shots": 160,
+   "plays": 202,
+   "team1": {
+    "name": null,
+    "color": "Red",
+    "roster": 7
+   },
+   "team2": {
+    "name": null,
+    "color": "White",
+    "roster": 9
+   },
+   "s3_prefix": "court-a/2026-04-16/ee8745f1-863f-47cf-a43d/"
+  },
+  {
+   "gid8": "2c490f1a",
+   "date": "2026-04-16",
+   "split": "train",
+   "shots": 153,
+   "plays": 218,
+   "team1": {
+    "name": null,
+    "color": "Gray",
+    "roster": 10
+   },
+   "team2": {
+    "name": null,
+    "color": "Orange",
+    "roster": 10
+   },
+   "s3_prefix": "court-a/2026-04-16/2c490f1a-b634-44a1-bddf/"
+  },
+  {
+   "gid8": "922bff3b",
+   "date": "2026-04-16",
+   "split": "train",
+   "shots": 137,
+   "plays": 229,
+   "team1": {
+    "name": null,
+    "color": "Black",
+    "roster": 9
+   },
+   "team2": {
+    "name": null,
+    "color": "Grey",
+    "roster": 10
+   },
+   "s3_prefix": "court-a/2026-04-16/922bff3b-0646-4542-9eec/"
+  },
+  {
+   "gid8": "29b51d57",
+   "date": "2026-04-16",
+   "split": "val",
+   "shots": 164,
+   "plays": 252,
+   "team1": {
+    "name": null,
+    "color": "White",
+    "roster": 9
+   },
+   "team2": {
+    "name": null,
+    "color": "Blue",
+    "roster": 7
+   },
+   "s3_prefix": "court-a/2026-04-16/29b51d57-b8db-47a0-a076/"
+  },
+  {
+   "gid8": "74c4f686",
+   "date": "2026-04-17",
+   "split": "val",
+   "shots": 147,
+   "plays": 221,
+   "team1": {
+    "name": null,
+    "color": "Black",
+    "roster": 7
+   },
+   "team2": {
+    "name": null,
+    "color": "Red",
+    "roster": 7
+   },
+   "s3_prefix": "court-a/2026-04-17/74c4f686-fa1b-4c9a-ace4/"
+  },
+  {
+   "gid8": "d0a9faef",
+   "date": "2026-04-17",
+   "split": "train",
+   "shots": 142,
+   "plays": 218,
+   "team1": {
+    "name": null,
+    "color": "Blue",
+    "roster": 9
+   },
+   "team2": {
+    "name": null,
+    "color": "Black",
+    "roster": 10
+   },
+   "s3_prefix": "court-a/2026-04-17/d0a9faef-e5c6-4a48-95bd/"
+  },
+  {
+   "gid8": "9eb51980",
+   "date": "2026-04-17",
+   "split": "train",
+   "shots": 160,
+   "plays": 245,
+   "team1": {
+    "name": null,
+    "color": "Green",
+    "roster": 7
+   },
+   "team2": {
+    "name": null,
+    "color": "Red",
+    "roster": 9
+   },
+   "s3_prefix": "court-a/2026-04-17/9eb51980-1219-492e-8aa3/"
+  },
+  {
+   "gid8": "d186e25e",
+   "date": "2026-04-18",
+   "split": "train",
+   "shots": 158,
+   "plays": 194,
+   "team1": {
+    "name": null,
+    "color": "Red",
+    "roster": 7
+   },
+   "team2": {
+    "name": null,
+    "color": "Yellow",
+    "roster": 10
+   },
+   "s3_prefix": "court-a/2026-04-18/d186e25e-d3d0-4e0d-aec5/"
+  },
+  {
+   "gid8": "6d601c99",
+   "date": "2026-04-18",
+   "split": "test",
+   "shots": 136,
+   "plays": 192,
+   "team1": {
+    "name": "305 Turnovers",
+    "color": "Blue",
+    "roster": 11
+   },
+   "team2": {
+    "name": "?",
+    "color": "Gray",
+    "roster": 8
+   },
+   "s3_prefix": "court-a/2026-04-18/6d601c99-9173-445f-a647/"
+  },
+  {
+   "gid8": "2399cfac",
+   "date": "2026-04-28",
+   "split": "train",
+   "shots": 201,
+   "plays": 244,
+   "team1": {
+    "name": null,
+    "color": "Black",
+    "roster": 12
+   },
+   "team2": {
+    "name": null,
+    "color": "Blue",
+    "roster": 7
+   },
+   "s3_prefix": "court-a/2026-04-28/2399cfac-684d-4768-b6ac/"
+  },
+  {
+   "gid8": "b68967fe",
+   "date": "2026-04-28",
+   "split": "val",
+   "shots": 171,
+   "plays": 221,
+   "team1": {
+    "name": null,
+    "color": "Grey",
+    "roster": 12
+   },
+   "team2": {
+    "name": null,
+    "color": "Yellow",
+    "roster": 6
+   },
+   "s3_prefix": "court-a/2026-04-28/b68967fe-bf82-42d8-9557/"
+  },
+  {
+   "gid8": "8dcb1330",
+   "date": "2026-04-28",
+   "split": "train",
+   "shots": 167,
+   "plays": 208,
+   "team1": {
+    "name": null,
+    "color": "Black",
+    "roster": 10
+   },
+   "team2": {
+    "name": null,
+    "color": "Yellow",
+    "roster": 7
+   },
+   "s3_prefix": "court-a/2026-04-28/8dcb1330-1d32-4e00-826b/"
+  },
+  {
+   "gid8": "95d2ea95",
+   "date": "2026-04-29",
+   "split": "train",
+   "shots": 179,
+   "plays": 223,
+   "team1": {
+    "name": null,
+    "color": "White",
+    "roster": 7
+   },
+   "team2": {
+    "name": null,
+    "color": "Black",
+    "roster": 9
+   },
+   "s3_prefix": "court-a/2026-04-29/95d2ea95-e51b-4ca3-821e/"
+  },
+  {
+   "gid8": "cd045da8",
+   "date": "2026-04-29",
+   "split": "train",
+   "shots": 162,
+   "plays": 208,
+   "team1": {
+    "name": "",
+    "color": "White",
+    "roster": 8
+   },
+   "team2": {
+    "name": null,
+    "color": "Blue",
+    "roster": 8
+   },
+   "s3_prefix": "court-a/2026-04-29/cd045da8-5a06-41cd-86fb/"
+  },
+  {
+   "gid8": "0fa23810",
+   "date": "2026-05-15",
+   "split": "train",
+   "shots": 144,
+   "plays": 188,
+   "team1": {
+    "name": null,
+    "color": "White",
+    "roster": 9
+   },
+   "team2": {
+    "name": null,
+    "color": "Black",
+    "roster": 7
+   },
+   "s3_prefix": "court-a/2026-05-15/0fa23810-d6e8-4799-995a/"
+  },
+  {
+   "gid8": "d446fe8c",
+   "date": "2026-05-15",
+   "split": "train",
+   "shots": 166,
+   "plays": 209,
+   "team1": {
+    "name": null,
+    "color": "Grey",
+    "roster": 8
+   },
+   "team2": {
+    "name": null,
+    "color": "White",
+    "roster": 9
+   },
+   "s3_prefix": "court-a/2026-05-15/d446fe8c-077f-4797-96bb/"
+  },
+  {
+   "gid8": "f66eb3b2",
+   "date": "2026-05-15",
+   "split": "train",
+   "shots": 161,
+   "plays": 203,
+   "team1": {
+    "name": null,
+    "color": "White",
+    "roster": 9
+   },
+   "team2": {
+    "name": null,
+    "color": "Black",
+    "roster": 9
+   },
+   "s3_prefix": "court-a/2026-05-15/f66eb3b2-6ed7-4812-8248/"
+  },
+  {
+   "gid8": "f3e7b25a",
+   "date": "2026-05-16",
+   "split": "fresh",
+   "shots": 0,
+   "plays": 190,
+   "team1": {
+    "name": null,
+    "color": "Black",
+    "roster": 8
+   },
+   "team2": {
+    "name": null,
+    "color": "Blue",
+    "roster": 10
+   },
+   "s3_prefix": "court-a/2026-05-16/f3e7b25a-430a-4b37-aa80/"
+  },
+  {
+   "gid8": "b3c1f62c",
+   "date": "2026-05-16",
+   "split": "fresh",
+   "shots": 0,
+   "plays": 195,
+   "team1": {
+    "name": null,
+    "color": "Blue",
+    "roster": 8
+   },
+   "team2": {
+    "name": null,
+    "color": "White",
+    "roster": 10
+   },
+   "s3_prefix": "court-a/2026-05-16/b3c1f62c-1a02-47c9-8d2a/"
+  },
+  {
+   "gid8": "77715f25",
+   "date": "2026-05-19",
+   "split": "fresh",
+   "shots": 0,
+   "plays": 240,
+   "team1": {
+    "name": null,
+    "color": "Red",
+    "roster": 8
+   },
+   "team2": {
+    "name": null,
+    "color": "Blue",
+    "roster": 9
+   },
+   "s3_prefix": "court-a/2026-05-19/77715f25-bf6e-4986-824b/"
+  },
+  {
+   "gid8": "cc5deb39",
+   "date": "2026-05-19",
+   "split": "fresh",
+   "shots": 0,
+   "plays": 204,
+   "team1": {
+    "name": null,
+    "color": "Grey",
+    "roster": 11
+   },
+   "team2": {
+    "name": null,
+    "color": "Yellow",
+    "roster": 8
+   },
+   "s3_prefix": "court-a/2026-05-19/cc5deb39-71de-4ea9-b3a2/"
+  },
+  {
+   "gid8": "cc1710c4",
+   "date": "2026-05-19",
+   "split": "fresh",
+   "shots": 0,
+   "plays": 214,
+   "team1": {
+    "name": null,
+    "color": "Navy",
+    "roster": 9
+   },
+   "team2": {
+    "name": null,
+    "color": "Grey",
+    "roster": 6
+   },
+   "s3_prefix": "court-a/2026-05-19/cc1710c4-ddac-44ef-9e78/"
+  }
+ ],
+ "all_complete_4angle_games": [
+  "2026-01-20/ac650a1d-1594-4759-839d",
+  "2026-01-29/31bbd85a-a736-4665-bfd2",
+  "2026-01-29/50950797-22a5-4129-a2f4",
+  "2026-01-29/89b61e9b-d07b-4431-be56",
+  "2026-01-30/02c2f5f3-d8d1-4182-b165",
+  "2026-01-30/5e4357e2-3def-4c5d-be89",
+  "2026-01-30/63bbe980-06cc-445c-9ebc",
+  "2026-01-30/c76f67a8-4285-47c9-8264",
+  "2026-01-30/d8ebeb20-ada3-4f52-bb33",
+  "2026-01-31/13e1ffad-e08b-4e1e-84bf",
+  "2026-01-31/237157c3-7fb5-49f7-b869",
+  "2026-01-31/3e193690-99a0-4bad-b411",
+  "2026-01-31/6b59309d-1add-472f-8f52",
+  "2026-02-03/2f019bd5-6ca2-4d05-b768",
+  "2026-02-03/8f87bdb8-6b13-4642-8ea8",
+  "2026-02-03/9a2adbcc-df96-41c0-9c86",
+  "2026-02-03/bbecd8c2-f9e7-4868-9b91",
+  "2026-03-18/0701ebb3-5afd-45fc-ba61",
+  "2026-03-18/6aa55733-2cd6-4b0d-841b",
+  "2026-03-18/e6fba750-596a-441d-b216",
+  "2026-03-18/fae96103-918b-40ad-bbe2",
+  "2026-03-19/31c4f5e2-ba18-47cc-b058",
+  "2026-03-19/74c9fe81-4c2c-4ca9-9477",
+  "2026-03-19/c2a354fe-eb34-4980-af00",
+  "2026-04-16/29b51d57-b8db-47a0-a076",
+  "2026-04-16/2c490f1a-b634-44a1-bddf",
+  "2026-04-16/922bff3b-0646-4542-9eec",
+  "2026-04-16/ee8745f1-863f-47cf-a43d",
+  "2026-04-17/74c4f686-fa1b-4c9a-ace4",
+  "2026-04-17/9eb51980-1219-492e-8aa3",
+  "2026-04-17/d0a9faef-e5c6-4a48-95bd",
+  "2026-04-18/6d601c99-9173-445f-a647",
+  "2026-04-18/78acaf33-facd-4681-8d7f",
+  "2026-04-18/d186e25e-d3d0-4e0d-aec5",
+  "2026-04-28/2399cfac-684d-4768-b6ac",
+  "2026-04-28/8dcb1330-1d32-4e00-826b",
+  "2026-04-28/8e99b8e8-9673-4b14-98be",
+  "2026-04-28/b68967fe-bf82-42d8-9557",
+  "2026-04-29/20362e2a-7508-419d-a72a",
+  "2026-04-29/95d2ea95-e51b-4ca3-821e",
+  "2026-04-29/cd045da8-5a06-41cd-86fb",
+  "2026-05-11/12a088eb-be66-4514-91b1",
+  "2026-05-14/5b783163-40e6-4349-acee",
+  "2026-05-15/0fa23810-d6e8-4799-995a",
+  "2026-05-15/49b3873e-e1ea-42f5-be86",
+  "2026-05-15/d446fe8c-077f-4797-96bb",
+  "2026-05-15/f66eb3b2-6ed7-4812-8248",
+  "2026-05-16/b3c1f62c-1a02-47c9-8d2a",
+  "2026-05-16/f3e7b25a-430a-4b37-aa80",
+  "2026-05-18/329042f1-02bc-46eb-ae9c",
+  "2026-05-19/77715f25-bf6e-4986-824b",
+  "2026-05-19/cc1710c4-ddac-44ef-9e78",
+  "2026-05-19/cc5deb39-71de-4ea9-b3a2",
+  "2026-05-21/b7956f81-0dde-4146-ba9d",
+  "2026-05-22/0ad23700-7205-4513-8008",
+  "2026-05-22/0af6ae02-2b88-47dd-9858",
+  "2026-05-22/fb677f72-9f2c-4f43-9c4f"
+ ]
+}

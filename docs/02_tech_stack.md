@@ -25,7 +25,7 @@ benchmark-only — see [10_data_and_licensing](10_data_and_licensing.md)).
 | Pose | **RTMPose / RTMO** (MMPose) | Apache-2.0 | Top-down or one-stage; commercial-clean (replaces AGPL YOLO-pose) |
 | Re-ID (cross-cam) | **Torchreid** OSNet (`KaiyangZhou/deep-person-reid`) | MIT | Battle-tested appearance embeddings |
 | Court projection | `roboflow/sports` **ViewTransformer** + our homographies | MIT | Per-cam → court coords + top-down radar |
-| Court keypoints | RF-DETR/keypoint model fine-tuned on Roboflow CC-BY court sets | Apache / CC-BY | Per-court assisted calibration |
+| Court keypoints | keypoint model trained on **our** per-court landmark annotations | ours | Per-court assisted calibration (no third-party court data — see [10](10_data_and_licensing.md)) |
 | Pipeline scaffold | **tracklab** (`TrackingLaboratory/tracklab`) | MIT | Modular detect/track/reid/calib stages |
 | Cross-cam fusion | **our code** (Hungarian + global Kalman) | ours | The core IP; mirrors MV3DT shape, fully open |
 | VLM state-reasoner | **LLM API** (Gemini / Claude) or on-prem **Qwen3** | API / Apache-2.0 | Reasons over JSON; vision unnecessary here |
