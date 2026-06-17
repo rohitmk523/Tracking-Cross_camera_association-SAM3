@@ -73,7 +73,8 @@ echo "[extract] $(wc -l < manifest.txt) videos; n={n} step={step}s; PARALLEL={pa
 T0=$(date +%s)
 one() {{
   local game="$1" angle="$2" url="$3" v="/work/$1_$2.mp4"
-  curl -s -L "$url" -o "$v" || {{ echo "[extract] dl FAIL $game/$angle"; return; }}
+  curl -s -L --connect-timeout 30 --max-time 900 --retry 3 --retry-delay 5 \
+    "$url" -o "$v" || {{ echo "[extract] dl FAIL $game/$angle"; rm -f "$v"; return; }}
   for k in $(seq 0 $(({n}-1))); do
     ffmpeg -nostdin -y -ss $((k*{step})) -i "$v" -frames:v 1 -q:v 2 \
       "/work/frames/$1_$2_f$(printf %03d $k).jpg" 2>/dev/null
