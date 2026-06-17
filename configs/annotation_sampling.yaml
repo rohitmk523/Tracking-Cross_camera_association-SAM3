@@ -29,4 +29,4 @@ games:
   - 29b51d57   # White / Blue
   - 74c4f686   # Black / Red
   - b68967fe   # Grey / Yellow
-  - cc1710c4   # Navy / Grey
+  # cc1710c4 (Navy/Grey) dropped: its NR video is corrupt -> ffmpeg hangs. 11 games.

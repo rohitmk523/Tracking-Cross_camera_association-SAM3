@@ -76,8 +76,8 @@ one() {{
   curl -s -L --connect-timeout 20 --max-time 240 --retry 1 --retry-max-time 300 \
     "$url" -o "$v" || {{ echo "[extract] dl FAIL $game/$angle (skipped)"; rm -f "$v"; return; }}
   for k in $(seq 0 $(({n}-1))); do
-    ffmpeg -nostdin -y -ss $((k*{step})) -i "$v" -frames:v 1 -q:v 2 \
-      "/work/frames/$1_$2_f$(printf %03d $k).jpg" 2>/dev/null
+    timeout 20 ffmpeg -nostdin -y -ss $((k*{step})) -i "$v" -frames:v 1 -q:v 2 \
+      "/work/frames/$1_$2_f$(printf %03d $k).jpg" 2>/dev/null || true
   done
   rm -f "$v"
   echo "[extract] $game/$angle done -> $(ls /work/frames/$1_$2_f*.jpg 2>/dev/null|wc -l) (t+$(($(date +%s)-T0))s)"
