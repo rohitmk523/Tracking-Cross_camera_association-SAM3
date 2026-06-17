@@ -59,28 +59,37 @@ def _presign(s3, method, key, exp=28800):
                                      ExpiresIn=exp)
 
 
-def _userdata(manifest_url, result_put_url, n, window) -> str:
+def _userdata(manifest_url, result_put_url, log_put_url, n, window) -> str:
+    step = max(1, window // n)
     return f"""#!/bin/bash
 exec > /var/log/extract.log 2>&1
+LOG_URL="{log_put_url}"
+(while true; do sleep 20; curl -s -T /var/log/extract.log "$LOG_URL" >/dev/null 2>&1 || true; done) &
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y && apt-get install -y ffmpeg
 mkdir -p /work/frames && cd /work
 curl -s -L "{manifest_url}" -o manifest.txt
-echo "[extract] $(wc -l < manifest.txt) videos"
+echo "[extract] $(wc -l < manifest.txt) videos; n={n} window={window} step={step}s"
+i=0
 while IFS='|' read -r game angle url; do
   [ -z "$game" ] && continue
-  curl -s -L "$url" -o v.mp4 || {{ echo "dl fail $game/$angle"; continue; }}
-  ffmpeg -nostdin -y -i v.mp4 -t {window} -vf "fps={n}/{window}" -frames:v {n} \
-    -q:v 2 "frames/${{game}}_${{angle}}_f%03d.jpg" 2>/dev/null
-  echo "[extract] $game/$angle -> $(ls frames/${{game}}_${{angle}}_f*.jpg 2>/dev/null | wc -l)"
+  i=$((i+1)); t0=$(date +%s)
+  curl -s -L "$url" -o v.mp4 || {{ echo "[extract] $i dl FAIL $game/$angle"; continue; }}
+  for k in $(seq 0 $(({n}-1))); do
+    t=$((k * {step}))
+    ffmpeg -nostdin -y -ss $t -i v.mp4 -frames:v 1 -q:v 2 \
+      "frames/${{game}}_${{angle}}_f$(printf %03d $k).jpg" 2>/dev/null
+  done
   rm -f v.mp4
+  echo "[extract] $i/{48} $game/$angle -> $(ls frames/${{game}}_${{angle}}_f*.jpg 2>/dev/null|wc -l) frames ($(($(date +%s)-t0))s)"
 done < manifest.txt
-echo "[extract] total $(ls frames/*.jpg 2>/dev/null | wc -l) frames"
+echo "[extract] DONE total $(ls frames/*.jpg 2>/dev/null | wc -l) frames"
 tar czf frames.tar.gz -C frames .
 for try in 1 2 3; do
   CODE=$(curl -sS --max-time 1800 -w '%{{http_code}}' -o /dev/null -T frames.tar.gz "{result_put_url}")
   echo "[extract] upload try $try http=$CODE"; [ "$CODE" = "200" ] && break; sleep 10
 done
+curl -s -T /var/log/extract.log "$LOG_URL" >/dev/null 2>&1 || true
 sleep 5; shutdown -h now
 """
 
@@ -100,7 +109,9 @@ def launch(a, cfg) -> None:
     man_key = f"{PREFIX}/manifest.txt"
     s3.put_object(Bucket=BUCKET, Key=man_key, Body="\n".join(lines).encode())
     result_key = f"{PREFIX}/frames.tar.gz"
-    ud = _userdata(_presign(s3, "get", man_key), _presign(s3, "put", result_key), n, window)
+    log_key = f"{PREFIX}/extract.log"
+    ud = _userdata(_presign(s3, "get", man_key), _presign(s3, "put", result_key),
+                   _presign(s3, "put", log_key), n, window)
 
     ec2 = boto3.client("ec2", region_name=REGION)
     r = ec2.run_instances(
@@ -115,6 +126,7 @@ def launch(a, cfg) -> None:
     iid = r["Instances"][0]["InstanceId"]
     print(f"launched {iid} ({a.instance_type})  {len(jobs)} videos x {n} frames "
           f"= ~{len(jobs)*n} frames")
+    print(f"watch:  aws s3 cp s3://{BUCKET}/{log_key} -")
     print(f"result lands: s3://{BUCKET}/{result_key}  (then run --fetch)")
 
 
