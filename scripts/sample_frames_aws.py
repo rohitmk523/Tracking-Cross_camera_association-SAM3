@@ -59,31 +59,35 @@ def _presign(s3, method, key, exp=28800):
                                      ExpiresIn=exp)
 
 
-def _userdata(manifest_url, result_put_url, log_put_url, n, window) -> str:
+def _userdata(manifest_url, result_put_url, log_put_url, n, window, par=8) -> str:
     step = max(1, window // n)
     return f"""#!/bin/bash
 exec > /var/log/extract.log 2>&1
 LOG_URL="{log_put_url}"
-(while true; do sleep 20; curl -s -T /var/log/extract.log "$LOG_URL" >/dev/null 2>&1 || true; done) &
+(while true; do sleep 15; curl -s -T /var/log/extract.log "$LOG_URL" >/dev/null 2>&1 || true; done) &
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y && apt-get install -y ffmpeg
 mkdir -p /work/frames && cd /work
 curl -s -L "{manifest_url}" -o manifest.txt
-echo "[extract] $(wc -l < manifest.txt) videos; n={n} window={window} step={step}s"
-i=0
+echo "[extract] $(wc -l < manifest.txt) videos; n={n} step={step}s; PARALLEL={par}"
+T0=$(date +%s)
+one() {{
+  local game="$1" angle="$2" url="$3" v="/work/$1_$2.mp4"
+  curl -s -L "$url" -o "$v" || {{ echo "[extract] dl FAIL $game/$angle"; return; }}
+  for k in $(seq 0 $(({n}-1))); do
+    ffmpeg -nostdin -y -ss $((k*{step})) -i "$v" -frames:v 1 -q:v 2 \
+      "/work/frames/$1_$2_f$(printf %03d $k).jpg" 2>/dev/null
+  done
+  rm -f "$v"
+  echo "[extract] $game/$angle done -> $(ls /work/frames/$1_$2_f*.jpg 2>/dev/null|wc -l) (t+$(($(date +%s)-T0))s)"
+}}
 while IFS='|' read -r game angle url; do
   [ -z "$game" ] && continue
-  i=$((i+1)); t0=$(date +%s)
-  curl -s -L "$url" -o v.mp4 || {{ echo "[extract] $i dl FAIL $game/$angle"; continue; }}
-  for k in $(seq 0 $(({n}-1))); do
-    t=$((k * {step}))
-    ffmpeg -nostdin -y -ss $t -i v.mp4 -frames:v 1 -q:v 2 \
-      "frames/${{game}}_${{angle}}_f$(printf %03d $k).jpg" 2>/dev/null
-  done
-  rm -f v.mp4
-  echo "[extract] $i/{48} $game/$angle -> $(ls frames/${{game}}_${{angle}}_f*.jpg 2>/dev/null|wc -l) frames ($(($(date +%s)-t0))s)"
+  one "$game" "$angle" "$url" &
+  while [ $(jobs -r | wc -l) -ge {par} ]; do sleep 0.5; done
 done < manifest.txt
-echo "[extract] DONE total $(ls frames/*.jpg 2>/dev/null | wc -l) frames"
+wait
+echo "[extract] DONE total $(ls /work/frames/*.jpg 2>/dev/null|wc -l) frames in $(($(date +%s)-T0))s"
 tar czf frames.tar.gz -C frames .
 for try in 1 2 3; do
   CODE=$(curl -sS --max-time 1800 -w '%{{http_code}}' -o /dev/null -T frames.tar.gz "{result_put_url}")
@@ -118,7 +122,8 @@ def launch(a, cfg) -> None:
         ImageId=AMI, InstanceType=a.instance_type, MinCount=1, MaxCount=1,
         InstanceInitiatedShutdownBehavior="terminate",
         BlockDeviceMappings=[{"DeviceName": "/dev/sda1",
-                              "Ebs": {"VolumeSize": 40, "VolumeType": "gp3",
+                              "Ebs": {"VolumeSize": 60, "VolumeType": "gp3",
+                                      "Throughput": 750, "Iops": 6000,
                                       "DeleteOnTermination": True}}],
         UserData=ud,
         TagSpecifications=[{"ResourceType": "instance",
@@ -156,7 +161,7 @@ def fetch(cfg) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=str(REPO / "configs" / "annotation_sampling.yaml"))
-    ap.add_argument("--instance-type", default="c5.2xlarge")
+    ap.add_argument("--instance-type", default="c5n.2xlarge")   # 25 Gbps network
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--fetch", action="store_true")
     ap.add_argument("--accept-unrotated-creds", action="store_true")
