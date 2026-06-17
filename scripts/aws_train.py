@@ -80,7 +80,7 @@ def build_userdata(ctx: Ctx, bundle_url: str, weights_url: str, log_url: str) ->
     return f"""#!/bin/bash
 exec > /var/log/train.log 2>&1
 export HOME=/root PYTHONUNBUFFERED=1
-export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.5 PYTORCH_MPS_LOW_WATERMARK_RATIO=0.4
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True   # reduce CUDA fragmentation/OOM
 LOG_URL="{log_url}"
 (while true; do sleep 30; curl -s -T /var/log/train.log "$LOG_URL" >/dev/null 2>&1 || true; done) &
 PYBIN=""

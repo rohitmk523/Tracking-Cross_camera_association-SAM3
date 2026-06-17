@@ -3,8 +3,8 @@
 model: small
 resolution: 1280            # ball is tiny from the far cams -> high-res
 epochs: 60
-batch_size: 8
-grad_accum: 2
+batch_size: 4         # RF-DETR-S @1280 OOMs at batch 8 on A10G 24GB; 4 fits
+grad_accum: 4         # effective batch 16
 early_stopping: true
 early_stopping_patience: 12
 class_names: [Basketball, Basketball Hoop]
