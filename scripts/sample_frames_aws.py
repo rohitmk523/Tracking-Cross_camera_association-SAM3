@@ -14,9 +14,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import sys
-import tarfile
-import tempfile
 from pathlib import Path
 
 import boto3
@@ -59,43 +58,45 @@ def _presign(s3, method, key, exp=28800):
                                      ExpiresIn=exp)
 
 
-def _userdata(manifest_url, result_put_url, log_put_url, n, window, par=8) -> str:
+def _userdata(creds: dict, n, window, par=6, hard_limit=1500) -> str:
     step = max(1, window // n)
     return f"""#!/bin/bash
 exec > /var/log/extract.log 2>&1
-LOG_URL="{log_put_url}"
-(while true; do sleep 15; curl -s -T /var/log/extract.log "$LOG_URL" >/dev/null 2>&1 || true; done) &
+export AWS_ACCESS_KEY_ID="{creds['AccessKeyId']}"
+export AWS_SECRET_ACCESS_KEY="{creds['SecretAccessKey']}"
+export AWS_SESSION_TOKEN="{creds['SessionToken']}"
+export AWS_DEFAULT_REGION="{REGION}"
+B={BUCKET}; P={PREFIX}
+# HARD safety net: terminate no matter what (independent of the extract script).
+(sleep {hard_limit}; shutdown -h now) &
+(while true; do sleep 15; aws s3 cp /var/log/extract.log s3://$B/$P/extract.log >/dev/null 2>&1 || true; done) &
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y && apt-get install -y ffmpeg
 mkdir -p /work/frames && cd /work
-curl -s -L "{manifest_url}" -o manifest.txt
-echo "[extract] $(wc -l < manifest.txt) videos; n={n} step={step}s; PARALLEL={par}"
+aws s3 cp s3://$B/$P/manifest.txt manifest.txt
+echo "[extract] $(wc -l < manifest.txt) videos; n={n} step={step}s PAR={par} hard_limit={hard_limit}s"
 T0=$(date +%s)
 one() {{
-  local game="$1" angle="$2" url="$3" v="/work/$1_$2.mp4"
-  curl -s -L --connect-timeout 20 --max-time 240 --retry 1 --retry-max-time 300 \
-    "$url" -o "$v" || {{ echo "[extract] dl FAIL $game/$angle (skipped)"; rm -f "$v"; return; }}
+  local game="$1" angle="$2" key="$3" v="/work/$1_$2.mp4"
+  timeout 300 aws s3 cp "s3://$B/$key" "$v" --only-show-errors || {{ echo "[extract] dl FAIL $game/$angle"; rm -f "$v"; return; }}
   for k in $(seq 0 $(({n}-1))); do
-    timeout 20 ffmpeg -nostdin -y -ss $((k*{step})) -i "$v" -frames:v 1 -q:v 2 \
+    timeout 15 ffmpeg -nostdin -y -ss $((k*{step})) -i "$v" -frames:v 1 -q:v 2 \
       "/work/frames/$1_$2_f$(printf %03d $k).jpg" 2>/dev/null || true
   done
   rm -f "$v"
-  echo "[extract] $game/$angle done -> $(ls /work/frames/$1_$2_f*.jpg 2>/dev/null|wc -l) (t+$(($(date +%s)-T0))s)"
+  # upload THIS video's frames immediately -- a later hang can never lose them
+  aws s3 cp /work/frames/ s3://$B/$P/pool/ --recursive --exclude "*" --include "$1_$2_f*.jpg" --only-show-errors
+  echo "[extract] $game/$angle done -> $(ls /work/frames/$1_$2_f*.jpg 2>/dev/null|wc -l) uploaded (t+$(($(date +%s)-T0))s)"
 }}
-while IFS='|' read -r game angle url; do
+while IFS='|' read -r game angle key; do
   [ -z "$game" ] && continue
-  one "$game" "$angle" "$url" &
+  one "$game" "$angle" "$key" &
   while [ $(jobs -r | wc -l) -ge {par} ]; do sleep 0.5; done
 done < manifest.txt
 wait
 echo "[extract] DONE total $(ls /work/frames/*.jpg 2>/dev/null|wc -l) frames in $(($(date +%s)-T0))s"
-tar czf frames.tar.gz -C frames .
-for try in 1 2 3; do
-  CODE=$(curl -sS --max-time 1800 -w '%{{http_code}}' -o /dev/null -T frames.tar.gz "{result_put_url}")
-  echo "[extract] upload try $try http=$CODE"; [ "$CODE" = "200" ] && break; sleep 10
-done
-curl -s -T /var/log/extract.log "$LOG_URL" >/dev/null 2>&1 || true
-sleep 5; shutdown -h now
+aws s3 cp /var/log/extract.log s3://$B/$P/extract.log >/dev/null 2>&1 || true
+shutdown -h now
 """
 
 
@@ -109,14 +110,16 @@ def launch(a, cfg) -> None:
 
     jobs = _video_jobs(cfg)
     n, window = int(cfg["n_per_game_angle"]), int(cfg.get("window_sec", 480))
-    # manifest: game|angle|presigned_video_url  (one line per video)
-    lines = [f"{g}|{ang}|{_presign(s3, 'get', key)}" for g, ang, key in jobs]
-    man_key = f"{PREFIX}/manifest.txt"
-    s3.put_object(Bucket=BUCKET, Key=man_key, Body="\n".join(lines).encode())
-    result_key = f"{PREFIX}/frames.tar.gz"
+    # Temporary session credentials (expire in 12h) -- the instance uses aws s3 cp
+    # (fast multipart download + per-video upload). Safer than long-lived keys.
+    creds = boto3.client("sts", region_name=REGION).get_session_token(
+        DurationSeconds=43200)["Credentials"]
+    # manifest: game|angle|s3_key  (instance has creds -> aws s3 cp directly)
+    lines = [f"{g}|{ang}|{key}" for g, ang, key in jobs]
+    s3.put_object(Bucket=BUCKET, Key=f"{PREFIX}/manifest.txt",
+                  Body="\n".join(lines).encode())
     log_key = f"{PREFIX}/extract.log"
-    ud = _userdata(_presign(s3, "get", man_key), _presign(s3, "put", result_key),
-                   _presign(s3, "put", log_key), n, window)
+    ud = _userdata(creds, n, window)
 
     ec2 = boto3.client("ec2", region_name=REGION)
     r = ec2.run_instances(
@@ -131,9 +134,9 @@ def launch(a, cfg) -> None:
                             "Tags": [{"Key": "Name", "Value": "uball-frame-extract"}]}])
     iid = r["Instances"][0]["InstanceId"]
     print(f"launched {iid} ({a.instance_type})  {len(jobs)} videos x {n} frames "
-          f"= ~{len(jobs)*n} frames")
+          f"= ~{len(jobs)*n} frames  (hard self-terminate; per-video S3 upload)")
     print(f"watch:  aws s3 cp s3://{BUCKET}/{log_key} -")
-    print(f"result lands: s3://{BUCKET}/{result_key}  (then run --fetch)")
+    print(f"frames land incrementally: s3://{BUCKET}/{PREFIX}/pool/  (then run --fetch)")
 
 
 def dry_run(cfg) -> None:
@@ -147,15 +150,14 @@ def dry_run(cfg) -> None:
 
 
 def fetch(cfg) -> None:
-    s3 = _s3()
+    """Sync whatever frames the instance uploaded (per-video, so always available
+    even if the run was cut short by the hard self-terminate)."""
     out_imgs = REPO / cfg["out_dir"] / "images"
     out_imgs.mkdir(parents=True, exist_ok=True)
-    tmp = Path(tempfile.mkdtemp()) / "frames.tar.gz"
-    s3.download_file(BUCKET, f"{PREFIX}/frames.tar.gz", str(tmp))
-    with tarfile.open(tmp) as t:
-        t.extractall(out_imgs)                       # noqa: S202 (our own tarball)
+    subprocess.run(["aws", "s3", "sync", f"s3://{BUCKET}/{PREFIX}/pool/",
+                    str(out_imgs), "--only-show-errors"], check=False)
     n = len(list(out_imgs.glob("*.jpg")))
-    print(f"unpacked {n} frames -> {out_imgs}")
+    print(f"synced {n} frames -> {out_imgs}")
     print("next: scripts/prelabel.py")
 
 
