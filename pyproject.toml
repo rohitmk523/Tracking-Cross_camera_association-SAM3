@@ -30,6 +30,8 @@ baseline = [
 ]
 # Small-object sliced inference / fine-tune on the far-endline ROI band.
 sahi = ["sahi>=0.11.18"]
+# Human-in-the-loop annotation UI (scripts/annotate.py).
+annotate = ["fastapi>=0.110", "uvicorn>=0.29", "pydantic>=2.0"]
 dev = ["pytest>=8.0", "ruff>=0.5"]
 
 [build-system]
