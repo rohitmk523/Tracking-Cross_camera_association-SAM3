@@ -118,10 +118,17 @@ sleep 5; shutdown -h now
 
 
 def _guard_rotation(ctx: Ctx, a) -> None:
-    """Refuse to spend AWS on un-rotated, flagged credentials (docs/11)."""
+    """Refuse to spend AWS on flagged credentials unless explicitly authorized (docs/11).
+
+    Two honest overrides:
+      --i-rotated-creds        : the keys WERE rotated (clean).
+      --accept-unrotated-creds : operator accepts spending on the CURRENT (un-rotated)
+                                 flagged keys now; rotation is still OWED afterwards.
+    """
     import boto3
     flagged = str(ctx.aws.get("flagged_account", "")).strip()
-    confirmed = a.i_rotated_creds or os.environ.get("UBALL_AWS_CREDS_ROTATED") == "1"
+    rotated = a.i_rotated_creds or os.environ.get("UBALL_AWS_CREDS_ROTATED") == "1"
+    accept_unrotated = getattr(a, "accept_unrotated_creds", False)
     if not flagged:                              # fail CLOSED (review #16)
         sys.exit("config aws.flagged_account is empty -- refusing to launch without "
                  "a rotation guard. Set it (docs/11) before launching.")
@@ -131,11 +138,14 @@ def _guard_rotation(ctx: Ctx, a) -> None:
         sys.exit(f"AWS credentials not usable ({e}). Configure ~/.aws or .env first.")
     account = ident.get("Account", "?")
     print(f"AWS account: {account}  (arn={ident.get('Arn','?')})")
-    if account == flagged and not confirmed:
+    if account == flagged and not (rotated or accept_unrotated):
         sys.exit(
             f"\nREFUSING TO LAUNCH: account {account} uses keys flagged for ROTATION "
-            "(docs/11).\nRotate them, then re-run with --i-rotated-creds (or set "
-            "UBALL_AWS_CREDS_ROTATED=1). Never commit the new keys.")
+            "(docs/11).\nEither rotate them and pass --i-rotated-creds, or pass "
+            "--accept-unrotated-creds to launch on the current keys (rotation still owed).")
+    if account == flagged and accept_unrotated and not rotated:
+        print("\n  ⚠️  LAUNCHING ON UN-ROTATED FLAGGED KEYS (operator-authorized).")
+        print("  ⚠️  These admin keys are exposed -- ROTATION IS STILL OWED after this run.\n")
 
 
 def launch(ctx: Ctx, a) -> None:
@@ -220,6 +230,8 @@ def main() -> int:
     ap.add_argument("--fetch", action="store_true")
     ap.add_argument("--i-rotated-creds", action="store_true",
                     help="confirm the flagged AWS keys were rotated (docs/11)")
+    ap.add_argument("--accept-unrotated-creds", action="store_true",
+                    help="launch on the CURRENT un-rotated flagged keys; rotation owed after")
     ap.add_argument("--weights-key", default=None,
                     help="S3 weights filename (default <run_name>_best.pth)")
     ap.add_argument("--out", default=None)
