@@ -1,0 +1,32 @@
+# Frame-sampling policy for the Model-A (player+referee+ball) annotation pool.
+# Gap-weighted across NEW games (NOT e6fba750/c2a354fe -- those are already
+# annotated). All 4 angles (the tracking detector runs per-camera). Frames are
+# stream-extracted from S3 (court-a/<date>/<gid>/<date>_<gid>_<ANGLE>.mp4).
+#
+# ~1500 frames: 12 games x 4 angles x 32 frames = 1536.
+target_total: 1536
+n_per_game_angle: 32
+angles: [FL, FR, NL, NR]
+
+# One pass per video: byte-copy the first `window_sec` (fast, no per-frame remote
+# seek), then extract n_per_game_angle evenly-spaced frames locally. Early-game
+# window keeps it fast; cross-game/angle variety is the main diversity axis.
+window_sec: 480
+
+out_dir: data/annotate_pool
+
+# Gap-weighted game set (diverse jersey colors; cross-game generalization).
+# gid8s resolved to S3 paths via configs/games.json.
+games:
+  - 2c490f1a   # Gray / Orange
+  - 922bff3b   # Black / Grey
+  - d0a9faef   # Blue / Black
+  - 9eb51980   # Green / Red
+  - d186e25e   # Red / Yellow
+  - 2399cfac   # Black / Blue
+  - 95d2ea95   # White / Black
+  - d446fe8c   # Grey / White
+  - 29b51d57   # White / Blue
+  - 74c4f686   # Black / Red
+  - b68967fe   # Grey / Yellow
+  - cc1710c4   # Navy / Grey

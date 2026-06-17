@@ -1,0 +1,106 @@
+<!doctype html><html><head><meta charset="utf-8">
+<title>Uball Player/Ref/Ball Annotator</title>
+<style>
+  body{margin:0;background:#111;color:#ddd;font:14px system-ui;height:100vh;display:flex;flex-direction:column}
+  #bar{padding:6px 10px;background:#1a1a1a;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .pill{background:#262626;border-radius:10px;padding:2px 8px}
+  .app{background:#1d4d2a;color:#9f9} .pend{background:#4d3a1d;color:#fd9}
+  .c0{color:#22cc55} .c1{color:#ffaa00} .c2{color:#ff3333}
+  #wrap{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  canvas{background:#000;cursor:crosshair;max-width:100%;max-height:100%}
+  #help{padding:5px 10px;background:#1a1a1a;color:#999;font-size:12px}
+  kbd{background:#333;border-radius:4px;padding:1px 5px}
+</style></head><body>
+<div id="bar">
+  <b>Player/Ref/Ball</b>
+  <span class="pill" id="pos">–/–</span>
+  <span class="pill" id="stem" style="max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">–</span>
+  <span class="pill" id="statusp">–</span>
+  <span class="pill">draw: <b id="drawcls" class="c0">PLAYER</b></span>
+  <span class="pill" id="dirty"></span>
+  <span class="pill" id="cnt">0 / 0 approved</span>
+</div>
+<div id="wrap"><canvas id="c"></canvas></div>
+<div id="help">
+  <kbd>1</kbd>player <kbd>2</kbd>referee <kbd>3</kbd>ball &nbsp; drag=new box, click=select &nbsp;
+  <kbd>D</kbd>/<kbd>Del</kbd>delete <kbd>U</kbd>undo &nbsp; <kbd>A</kbd>approve+next <kbd>S</kbd>save
+  <kbd>N</kbd>/<kbd>→</kbd>next <kbd>P</kbd>/<kbd>←</kbd>prev <kbd>G</kbd>next-pending
+</div>
+<script>
+const CLS=[["PLAYER","#22cc55"],["REFEREE","#ffaa00"],["BALL","#ff3333"]];
+const cv=document.getElementById('c'), ctx=cv.getContext('2d');
+let idx=0,total=0,img=new Image(),iw=0,ih=0,boxes=[],sel=-1,drawCls=0,dirty=false;
+let view={scale:1,ox:0,oy:0}, drag=null;
+
+function setDrawCls(){const x=document.getElementById('drawcls');x.textContent=CLS[drawCls][0];x.className='c'+drawCls;}
+function setDirty(d){dirty=d;document.getElementById('dirty').textContent=d?'● unsaved':'';}
+function toCanvas(px,py){return [px*view.scale+view.ox, py*view.scale+view.oy];}
+function toImg(cx,cy){return [(cx-view.ox)/view.scale, (cy-view.oy)/view.scale];}
+
+function fit(){
+  const wrap=document.getElementById('wrap');
+  cv.width=wrap.clientWidth; cv.height=wrap.clientHeight;
+  const s=Math.min(cv.width/iw, cv.height/ih); view.scale=s;
+  view.ox=(cv.width-iw*s)/2; view.oy=(cv.height-ih*s)/2; redraw();
+}
+function redraw(){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.drawImage(img,view.ox,view.oy,iw*view.scale,ih*view.scale);
+  boxes.forEach((b,i)=>{
+    const [x1,y1]=toCanvas((b.cx-b.w/2)*iw,(b.cy-b.h/2)*ih);
+    const [x2,y2]=toCanvas((b.cx+b.w/2)*iw,(b.cy+b.h/2)*ih);
+    ctx.lineWidth=i===sel?3:2; ctx.strokeStyle=CLS[b.cls][1];
+    ctx.strokeRect(x1,y1,x2-x1,y2-y1);
+    ctx.fillStyle=CLS[b.cls][1]; ctx.font='12px system-ui';
+    ctx.fillText(CLS[b.cls][0].toLowerCase(), x1+2, y1-3);
+  });
+  if(drag){ctx.lineWidth=2;ctx.strokeStyle=CLS[drawCls][1];ctx.setLineDash([5,3]);
+    const [x1,y1]=toCanvas(drag.x0,drag.y0),[x2,y2]=toCanvas(drag.x1,drag.y1);
+    ctx.strokeRect(x1,y1,x2-x1,y2-y1);ctx.setLineDash([]);}
+}
+async function load(i){
+  const r=await fetch('/api/item/'+i); if(!r.ok)return; const d=await r.json();
+  idx=d.idx; total=d.total; boxes=d.boxes; sel=-1; setDirty(false);
+  document.getElementById('pos').textContent=(idx+1)+'/'+total;
+  document.getElementById('stem').textContent=d.stem;
+  const sp=document.getElementById('statusp'); sp.textContent=d.status;
+  sp.className='pill '+(d.status==='approved'?'app':'pend');
+  document.getElementById('cnt').textContent=d.approved+' / '+total+' approved';
+  img=new Image(); img.onload=fit; img.src='/img/'+i+'?t='+Date.now(); iw=d.w; ih=d.h;
+}
+async function save(approve){
+  const r=await fetch('/api/save/'+idx,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({boxes,approve})}); const d=await r.json();
+  setDirty(false); document.getElementById('cnt').textContent=d.approved+' / '+d.total+' approved';
+  if(approve && d.next_pending>=0) load(d.next_pending);
+  else { const sp=document.getElementById('statusp'); if(approve){sp.textContent='approved';sp.className='pill app';} }
+}
+cv.addEventListener('mousedown',e=>{
+  const [ix,iy]=toImg(e.offsetX,e.offsetY);
+  for(let i=boxes.length-1;i>=0;i--){const b=boxes[i];
+    if(Math.abs(ix-b.cx*iw)<b.w*iw/2 && Math.abs(iy-b.cy*ih)<b.h*ih/2){sel=i;drawCls=b.cls;setDrawCls();redraw();return;}}
+  drag={x0:ix,y0:iy,x1:ix,y1:iy};
+});
+cv.addEventListener('mousemove',e=>{if(drag){const [ix,iy]=toImg(e.offsetX,e.offsetY);drag.x1=ix;drag.y1=iy;redraw();}});
+cv.addEventListener('mouseup',()=>{
+  if(drag){const x1=Math.min(drag.x0,drag.x1),x2=Math.max(drag.x0,drag.x1),
+    y1=Math.min(drag.y0,drag.y1),y2=Math.max(drag.y0,drag.y1);
+    if((x2-x1)>3&&(y2-y1)>3){boxes.push({cls:drawCls,cx:(x1+x2)/2/iw,cy:(y1+y2)/2/ih,
+      w:(x2-x1)/iw,h:(y2-y1)/ih});sel=boxes.length-1;setDirty(true);}
+    drag=null;redraw();}
+});
+document.addEventListener('keydown',async e=>{
+  if(e.key==='a'||e.key==='A') save(true);
+  else if(e.key==='s'||e.key==='S') save(false);
+  else if(e.key==='n'||e.key==='N'||e.key==='ArrowRight'){if(idx<total-1)load(idx+1);}
+  else if(e.key==='p'||e.key==='P'||e.key==='ArrowLeft'){if(idx>0)load(idx-1);}
+  else if(e.key==='g'||e.key==='G'){const r=await fetch('/api/next_pending?after='+idx);const d=await r.json();if(d.idx>=0)load(d.idx);}
+  else if(e.key==='1'){drawCls=0;setDrawCls();if(sel>=0){boxes[sel].cls=0;setDirty(true);redraw();}}
+  else if(e.key==='2'){drawCls=1;setDrawCls();if(sel>=0){boxes[sel].cls=1;setDirty(true);redraw();}}
+  else if(e.key==='3'){drawCls=2;setDrawCls();if(sel>=0){boxes[sel].cls=2;setDirty(true);redraw();}}
+  else if(e.key==='d'||e.key==='D'||e.key==='Delete'||e.key==='Backspace'){if(sel>=0){boxes.splice(sel,1);sel=-1;setDirty(true);redraw();}}
+  else if(e.key==='u'||e.key==='U'){if(boxes.length){boxes.pop();sel=-1;setDirty(true);redraw();}}
+});
+window.addEventListener('resize',fit);
+(async()=>{const r=await fetch('/api/next_pending?after=-1');const d=await r.json();load(d.idx>=0?d.idx:0);})();
+</script></body></html>
