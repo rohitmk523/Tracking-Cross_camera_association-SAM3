@@ -40,7 +40,8 @@ def _load_gt(stem, w, h):
     for ln in lf.read_text().splitlines():
         p = ln.split()
         if len(p) >= 5:
-            c = int(p[0]); cx, cy, bw, bh = (float(v) for v in p[1:5])
+            c = int(p[0])
+            cx, cy, bw, bh = (float(v) for v in p[1:5])
             out.append((c, [(cx-bw/2)*w, (cy-bh/2)*h, (cx+bw/2)*w, (cy+bh/2)*h]))
     return out
 
