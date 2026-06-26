@@ -1,0 +1,13 @@
+{
+  "court": "court-a",
+  "camera": "FL",
+  "game": "e6fba750",
+  "image_size": [1920, 1080],
+  "note": "PROVISIONAL pixel coords eyeballed from runs/tracking/_fl_grid.png. Refine the 4 'pixel' values (full-res 1920x1080) for an accurate homography; court coords are exact (court_2.dxf, cm).",
+  "correspondences": [
+    {"name": "center_circle",      "court": [1229.4, 865.1],  "pixel": [923, 913]},
+    {"name": "far_baseline_left",  "court": [2301.2, 151.8],  "pixel": [689, 529]},
+    {"name": "far_baseline_right", "court": [2301.2, 1578.2], "pixel": [1202, 545]},
+    {"name": "far_hoop",           "court": [2194.6, 865.1],  "pixel": [936, 304]}
+  ]
+}

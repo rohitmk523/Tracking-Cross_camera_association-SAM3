@@ -30,6 +30,21 @@ baseline = [
 ]
 # Small-object sliced inference / fine-tune on the far-endline ROI band.
 sahi = ["sahi>=0.11.18"]
+# Per-camera tracking (docs/05). `trackers` (Roboflow) is the supported ByteTrack/
+# BoT-SORT/SORT successor to supervision's deprecated bundled tracker; supervision
+# supplies the Detections container; motmetrics powers the MOTA/IDF1 eval;
+# scikit-learn (KMeans) + transformers SigLIP (from `baseline`) do team classification.
+tracking = [
+    "trackers>=2.4", "supervision>=0.28", "motmetrics>=1.4", "scikit-learn>=1.3",
+    "torchreid>=1.4", "gdown", "tensorboard",   # OSNet ReID (torchreid imports tensorboard/gdown eagerly)
+    "torchvision>=0.16",                         # jersey-number ResNet-18 reader
+]
+# Cross-camera fusion (docs/06): Hungarian (scipy) + court model from the DXF (ezdxf).
+fusion = ["scipy>=1.10", "ezdxf>=1.1"]
+# End-to-end pipeline server (scripts/pipeline_server.py): orchestrates detect→track→
+# fuse→VLM over the 4 angles. Needs `baseline`+`tracking`+`fusion` for the CV phases.
+pipeline = ["fastapi>=0.110", "uvicorn>=0.29", "pydantic>=2.0", "python-multipart>=0.0.9",
+            "google-genai>=1.0", "python-dotenv>=1.0"]
 # Human-in-the-loop annotation UI (scripts/annotate.py).
 annotate = ["fastapi>=0.110", "uvicorn>=0.29", "pydantic>=2.0"]
 dev = ["pytest>=8.0", "ruff>=0.5"]

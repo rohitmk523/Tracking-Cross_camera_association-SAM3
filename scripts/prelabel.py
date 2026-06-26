@@ -32,9 +32,12 @@ def _yolo_line(cid: int, box, w: int, h: int) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--pool", default=str(REPO / "data" / "annotate_pool"))
+    # default to the NEW cross-game model (11 games, val mAP@50 0.93, player held-out 0.884) so
+    # new games are pre-labeled by the strongest detector -> fewer operator corrections. The old
+    # e6-only nano model is still selectable via --player-weights for comparison.
     ap.add_argument("--player-weights",
-                    default=str(TF / "Uball E6 Demo" / "runs" / "e6_rfdetr_best.pth"))
-    ap.add_argument("--player-model", default="nano", choices=("nano", "small"))
+                    default=str(REPO / "runs" / "rfdetr-s-1280-ourdata-v1" / "best.pth"))
+    ap.add_argument("--player-model", default="small", choices=("nano", "small"))
     ap.add_argument("--ball-weights",
                     default=str(REPO / "runs" / "rfdetr-rim-near-v1" / "best.pth"))
     ap.add_argument("--ball-model", default="small", choices=("nano", "small"))

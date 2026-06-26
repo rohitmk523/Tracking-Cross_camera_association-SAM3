@@ -52,6 +52,10 @@ def _card(report) -> str:
         lines += ["", "> NOTE: `valid` is an in-domain temporal tail of the TRAIN game "
                   "(for early-stopping); `test` (the held-out game) is untouched. "
                   "True cross-court val awaits a 2nd venue / 3rd game (docs/14)."]
+    elif report.val_mode == "explicit":
+        lines += ["", "> NOTE: `valid` is one or more WHOLE held-out games (cross-game "
+                  "validation), distinct from `test`; no temporal-tail carving. `test` "
+                  "(the held-out anchor game) stays untouched."]
     if report.warnings:
         lines += ["", "## Warnings", *[f"- {w}" for w in report.warnings]]
     return "\n".join(lines) + "\n"

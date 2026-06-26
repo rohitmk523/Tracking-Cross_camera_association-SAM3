@@ -9,10 +9,17 @@ target_classes: [player, referee, ball]
 # (null = drop that id). Only `include: true` sources are consolidated.
 # ---------------------------------------------------------------------------
 sources:
-  - name: 4cam_detection            # authoritative cross-game player/ref/ball set
+  - name: annotate_pool             # operator-APPROVED pool: 11 games, all 4 angles, ball+ref
+    path: data/annotate_pool        # repo-relative (in-repo data/, not Training_frameworks)
+    repo_relative: true
+    include: true
+    priority: 0                     # authoritative; lower wins on duplicate frames
+    class_map: {0: player, 1: referee, 2: ball}
+
+  - name: 4cam_detection            # legacy cross-game set: e6fba750 (train) + c2a354fe (test)
     path: "Uball 4Cam Detection/data"
     include: true
-    priority: 0                     # lower wins on duplicate frames
+    priority: 1                     # pool wins any overlap (lower priority wins)
     class_map: {0: player, 1: referee, 2: ball}
 
   # e6-only, redundant with 4Cam's e6 frames, and carries an unnamed/ambiguous
@@ -47,18 +54,32 @@ sources:
 # split. Annotate a 3rd game from the "fresh" set to make val != test.)
 # ---------------------------------------------------------------------------
 split_map:
+  # annotate_pool train games (8) + legacy e6fba750 (extra train; ball=0)
+  2399cfac: train
+  2c490f1a: train
+  922bff3b: train
+  95d2ea95: train
+  9eb51980: train
+  d0a9faef: train
+  d186e25e: train
+  d446fe8c: train
   e6fba750: train
+  # annotate_pool valid games (3 WHOLE held-out games -> real cross-game validation)
+  29b51d57: valid
+  74c4f686: valid
+  b68967fe: valid
+  # held-out TEST anchor (docs/14; from 4cam_detection, ball unlabeled there)
   c2a354fe: test
 
-# val_mode (default temporal_holdout, per review): keep the held-out TEST game
-# (c2a, docs/14) truly untouched -- never use it for early-stopping.
-#   temporal_holdout -> carve `val_fraction` of the train game (by frame order,
-#                     per angle) as an in-domain val; TEST stays clean.  <-- default
+# val_mode: keep the held-out TEST game (c2a, docs/14) truly untouched.
+#   explicit       -> valid = the WHOLE games mapped to `valid` above (real cross-game
+#                     validation, distinct from test). No tail carving.  <-- current
+#   temporal_holdout -> carve `val_fraction` of the train game (by frame order, per
+#                     angle) as an in-domain val; TEST stays clean.
 #   held_out_game  -> val == test game. REJECTED as default: early-stopping would
-#                     select on the test set (review #5/#7). Use only if you
-#                     accept val==test and report it as such.
-val_mode: temporal_holdout
-val_fraction: 0.1
+#                     select on the test set (review #5/#7).
+val_mode: explicit
+val_fraction: 0.1            # unused when val_mode: explicit
 
 keep_empty_frames: false     # drop frames with no target instance after remap
 image_mode: copy             # copy | symlink (copy = self-contained for AWS bundle)

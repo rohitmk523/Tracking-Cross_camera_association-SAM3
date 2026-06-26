@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>uball · pipeline</title>
+<style>
+  :root{--bg:#0f1115;--panel:#171a21;--ink:#e6e8ec;--mut:#9aa3b2;--acc:#5b8cff;--line:#262b35;--ok:#3fb950;--run:#d29922;--err:#f85149;}
+  *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  header{padding:14px 20px;border-bottom:1px solid var(--line)}header h1{font-size:16px;margin:0}
+  .wrap{display:grid;grid-template-columns:380px 1fr;gap:0;height:calc(100vh - 51px)}
+  .panel{padding:18px 20px;overflow:auto}.left{border-right:1px solid var(--line);background:var(--panel)}
+  label{display:block;margin:10px 0 3px;color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+  input[type=file],select,input[type=text]{width:100%;background:#10131a;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:7px 9px;font:inherit}
+  button{margin-top:8px;background:var(--acc);color:#fff;border:0;border-radius:8px;padding:9px 12px;font-weight:600;cursor:pointer}
+  button.sec{background:#1d2330;border:1px solid var(--line)} button:disabled{opacity:.5;cursor:default}
+  .row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1}
+  pre{background:#0c0e13;border:1px solid var(--line);border-radius:8px;padding:12px;white-space:pre-wrap;word-break:break-word;font-size:12px}
+  .phase{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin:6px 0;background:#10131a}
+  .dot{width:9px;height:9px;border-radius:50%;background:#555}.pending .dot{background:#555}.running .dot{background:var(--run)}.done .dot{background:var(--ok)}.error .dot{background:var(--err)}
+  .pill{font-size:11px;color:var(--mut)}.muted{color:var(--mut)} a{color:var(--acc)}
+</style></head>
+<body>
+<header><h1>uball · pipeline <span class="muted" style="font-size:12px">4 angles → detect → track → fuse → VLM</span></h1></header>
+<div class="wrap">
+  <div class="panel left">
+    <h3 style="margin:4px 0">New job</h3>
+    <label>FL</label><input type="file" id="FL" accept="video/*">
+    <label>FR</label><input type="file" id="FR" accept="video/*">
+    <label>NL</label><input type="file" id="NL" accept="video/*">
+    <label>NR</label><input type="file" id="NR" accept="video/*">
+    <label>Narration angle</label>
+    <select id="narr"><option>FL</option><option>FR</option><option>NL</option><option>NR</option></select>
+    <label>Gemini API key (VLM phase)</label><input type="text" id="apikey" placeholder="stored in browser only">
+    <button id="create">Create job</button>
+    <div class="muted" id="cstat" style="font-size:12px"></div>
+    <hr style="border-color:var(--line);margin:16px 0">
+    <label>Jobs</label><select id="jobs"></select>
+    <button class="sec" id="refresh">Refresh</button>
+  </div>
+  <div class="panel">
+    <div id="job"></div>
+  </div>
+</div>
+<script>
+const $=id=>document.getElementById(id); let CUR=null, timer=null;
+const KEY=()=>{const k=$("apikey").value.trim(); if(k)localStorage.setItem("gkey",k); return k||localStorage.getItem("gkey")||""};
+$("apikey").value=localStorage.getItem("gkey")||"";
+async function jpost(url,body){const r=await fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body||{})});if(!r.ok)throw new Error((await r.json()).detail||r.statusText);return r.json();}
+async function loadJobs(){const j=await(await fetch("/api/jobs")).json();$("jobs").innerHTML=j.jobs.map(x=>`<option value="${x.id}">${x.id} · ${x.angles.join("/")}</option>`).join("");}
+$("refresh").onclick=loadJobs;
+$("jobs").onchange=()=>select($("jobs").value);
+$("create").onclick=async()=>{
+  const fd=new FormData(); let n=0;
+  for(const a of["FL","FR","NL","NR"]){const f=$(a).files[0]; if(f){fd.append(a,f);n++;}}
+  if(!n){$("cstat").textContent="pick at least one angle";return;}
+  fd.append("narration_angle",$("narr").value);
+  $("create").disabled=true;$("cstat").textContent="uploading "+n+" video(s)…";
+  try{const j=await(await fetch("/api/jobs",{method:"POST",body:fd})).json();$("cstat").textContent="job "+j.id+" created";await loadJobs();$("jobs").value=j.id;select(j.id);}
+  catch(e){$("cstat").textContent="error: "+e.message;} finally{$("create").disabled=false;}
+};
+function select(id){CUR=id;render();if(timer)clearInterval(timer);timer=setInterval(render,3000);}
+async function render(){
+  if(!CUR)return; const j=await(await fetch("/api/jobs/"+CUR)).json();
+  const phases=["detect","track","fuse","vlm"];
+  let h=`<h3>job ${j.id} <span class="muted" style="font-size:12px">${j.angles.join(" / ")} · narrate ${j.narration_angle}</span></h3>`;
+  h+=`<div class="row"><button onclick="runFull('${j.id}','run_cv')">▶ run CV (no VLM)</button><button onclick="runFull('${j.id}','run_full')">▶ run FULL (+VLM)</button></div>`;
+  for(const p of phases){const s=j.phases[p]||{status:"pending"};
+    const sum=s.summary&&Object.keys(s.summary).length?JSON.stringify(s.summary):"";
+    h+=`<div class="phase ${s.status}"><span class="dot"></span><b>${p}</b>
+      <span class="pill">${s.status}${s.error?" — "+s.error:""}</span>
+      <span style="margin-left:auto"><button class="sec" onclick="runPhase('${j.id}','${p}')">run</button>
+      ${s.status==="done"?`<a href="/api/jobs/${j.id}/artifact/${p}" target="_blank">artifact</a>`:""}</span></div>`;
+    if(sum)h+=`<pre>${sum}</pre>`;
+  }
+  if(j.phases.vlm&&j.phases.vlm.status==="done"){
+    const nar=await(await fetch(`/api/jobs/${j.id}/artifact/vlm`)).json();
+    const body = nar.rendered || ((nar.play_by_play||[]).map(p=>"• "+(p.description||"")).join("\n"));
+    h+=`<h3>VLM play-by-play <span class="muted" style="font-size:12px">(${nar.model})</span></h3>`+
+       `<pre><b>SUMMARY:</b> ${nar.summary||""}\n\n${body}</pre>`;
+  }
+  $("job").innerHTML=h;
+}
+async function runPhase(id,p){try{await jpost(`/api/jobs/${id}/phase/${p}`,p==="vlm"?{api_key:KEY()}:{});render();}catch(e){alert(e.message);}}
+async function runFull(id,which){try{await jpost(`/api/jobs/${id}/${which}`,{api_key:KEY()});render();}catch(e){alert(e.message);}}
+loadJobs();
+</script>
+</body></html>

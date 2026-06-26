@@ -73,3 +73,44 @@ camera sync is a prerequisite ([03](03_cameras_and_calibration.md)).
 ## Outputs & contract
 Per frame: `[{global_id, court_xy, team, jersey#?, name?, members:[(cam,track_id)], pose}]`
 + ball + per-camera boxes → world model ([08](08_world_model.md)).
+
+## Implementation status & results (2026-06-25)
+**Built (`src/uball_cc/fusion/`):**
+- `engine.py` — `FusionEngine`: gated association (court-dist + ReID + team + **jersey
+  authority**) → per-camera Hungarian → **visibility-weighted court Kalman** (`kalman.py`)
+  → persistent global IDs + `(team,number)` uniqueness + re-entry. **3 synthetic-GT tests pass**
+  (one-id-per-player, same-team-neighbours-separate, re-entry after blackout).
+- `court.py` — court model + top-down renderer (corner-origin, cm, from `configs/court_2.dxf`).
+- `homography.py` — pixel→court projection; reads either a direct `homography_matrix` or manual
+  correspondences. `audiosync.py` — FFT audio cross-correlation (ported from the dual_fusion repo).
+- Drivers: `scripts/project_tracks.py` (single-cam radar), `scripts/fuse_cams.py` (multi-cam).
+
+**Calibration (no manual picking):** adopted the 4 image→court homographies from
+**DEMO_UBALL/demo/calibration** (`FL/FR/NL/NR`, 1920×1080, same DXF court) → `configs/calib/*.json`.
+Cameras are fixed per court, so they apply to any court-a game.
+
+**Sync:** audio cross-correlation measured **FR = −13 frames** vs FL (peak 10) — i.e. the DB
+`video_metadata.sync_offset_seconds = 0` is unpopulated/wrong; real inter-angle offset ≈13 frames
+(matches the dual_fusion `BAKED_OFFSET=13`). Also: `video_metadata` only registers FL+FR (the near
+NL/NR files exist in S3 but aren't in the table).
+
+**Results on e6fba750 (12 s window):**
+- **NL + NR fuse cleanly** — ~14.7 global tracks/frame ≈ the real player count, teams separated.
+  The two near cams are 99–100% in-court accurate.
+- **Adding FL/FR over-counts** (~20/frame) — far cams project their far-field with large error
+  (6–7 calib inliers of 13–15), so the same player lands >3 m apart across cameras and the
+  per-camera association **spawns duplicates** instead of merging. ReID (imagenet OSNet) + zone
+  downweighting only nudged it (39→36 ids), because cross-view OSNet similarity is weak and
+  same-team players look alike.
+
+**Update (2026-06-25):** the engine now does **cluster-then-match** (`engine.py` `_cluster`):
+each frame, ALL cameras' observations are grouped into per-player clusters (≤1/camera, gated by
+team/jersey/proximity) *then* matched to tracks — structurally avoids duplicate-spawning. With a
+calibration-aware `cluster_dist=500`, the 4-cam drops from ~20 → **~15.8 players/frame** (≈ the
+clean NL+NR result). Synthetic-GT tests still pass.
+
+**Next (to fully clean the 4-cam), in priority — see [BACKLOG](BACKLOG.md):**
+1. **Re-calibrate FL/FR** with more/cleaner points — now the dominant residual (the same player's
+   far-cam projection lands >2–3 m from its near-cam projection, forcing a loose `cluster_dist`).
+2. **ReID-trained OSNet** (Market1501) not imagenet, for stronger cross-view matching.
+3. **Real NL/NR audio sync** (re-pull clips with audio; FR already synced at −13 frames).

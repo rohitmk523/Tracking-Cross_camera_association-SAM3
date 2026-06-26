@@ -57,9 +57,12 @@ def _frame_token(stem: str, angle: str | None) -> str:
 
 
 def _iter_source_frames(root: Path):
-    """Yield (image_path, label_path) for non-symlinked train/valid splits."""
-    for split in ("train", "valid", "val"):
-        img_dir, lab_dir = root / split / "images", root / split / "labels"
+    """Yield (image_path, label_path) for non-symlinked train/valid/val splits, or a
+    FLAT images/labels layout at the source root (e.g. the annotation pool). The source
+    sub-dir is just where frames live; the FINAL split is decided by split_map per game."""
+    layouts = [(root / sp / "images", root / sp / "labels") for sp in ("train", "valid", "val")]
+    layouts.append((root / "images", root / "labels"))        # flat pool layout
+    for img_dir, lab_dir in layouts:
         if not img_dir.is_dir() or img_dir.is_symlink():
             continue
         for img in sorted(img_dir.iterdir()):
@@ -103,8 +106,8 @@ def _validate_split_map(split_map: dict[str, str], games: dict[str, GameInfo]) -
                     f"split={gi.split!r} -- refuse to risk train/test contamination.")
 
 
-def collect_frames(cfg: dict, tf_root: Path,
-                   games: dict[str, GameInfo]) -> tuple[list[FrameItem], BuildReport]:
+def collect_frames(cfg: dict, tf_root: Path, games: dict[str, GameInfo],
+                   repo_root: Path) -> tuple[list[FrameItem], BuildReport]:
     target = list(cfg["target_classes"])
     name_to_id = {n: i for i, n in enumerate(target)}
     split_map: dict[str, str] = dict(cfg["split_map"])
@@ -120,7 +123,8 @@ def collect_frames(cfg: dict, tf_root: Path,
     items: dict[tuple[str, str | None, str], FrameItem] = {}
 
     for src in sources:
-        root = tf_root / src["path"]
+        base = repo_root if src.get("repo_relative") else tf_root
+        root = base / src["path"]
         if not root.is_dir():
             report.warnings.append(f"source missing: {src['path']}")
             continue
@@ -164,6 +168,8 @@ def collect_frames(cfg: dict, tf_root: Path,
 def _assign_val(items: list[FrameItem], cfg: dict) -> list[FrameItem]:
     """Apply val_mode: held_out_game (val==test game) or temporal_holdout."""
     mode = cfg["val_mode"]
+    if mode == "explicit":
+        return items                          # valid comes solely from split_map (whole games)
     if mode == "held_out_game":
         # Mirror the test game into valid (RF-DETR wants a 'valid' split for
         # early stopping). test stays as-is; valid is a copy of the test frames.
@@ -228,7 +234,7 @@ def write_coco(items: list[FrameItem], split: str, target: list[str],
 
 def build(cfg: dict, tf_root: Path, games: dict[str, GameInfo],
           repo_root: Path) -> BuildReport:
-    items, report = collect_frames(cfg, tf_root, games)
+    items, report = collect_frames(cfg, tf_root, games, repo_root)
     items = _assign_val(items, cfg)
     out = repo_root / cfg["out_dir"]
     if out.exists():

@@ -64,3 +64,34 @@ event log + on-demand frame handles are what the cloud narration layer consumes.
 The closer the world model mirrors reality, the more the VLM can reason from state alone —
 approaching "a VLM watching every frame" at a fraction of the latency/cost. Pose + accurate
 cross-camera positions are what make descriptive (not just classification) narration possible.
+
+## Implementation status (2026-06-26)
+**Event deriver built** (`src/uball_cc/fusion/events.py`, `scripts/derive_events.py`): consumes
+the fused world-state and emits a deterministic event JSON — `possession` (nearest-player-to-ball,
+temporally voted), `pass` / `turnover` (possession transfer same/cross team), `transition`
+(team-centroid sweep) — each with `confidence` + `needs_frame_check`. Ball-optional: with no ball
+trace it emits only team-spatial events and a caveat (honest degradation, never guesses possession).
+
+**The ball is the dependency, and it's hard here.** The tracker output carries only player(0)/ref(1),
+no ball(2). The detector *fires* on the ball in ~92% of frames but at very low confidence (full-frame
+NR: max score 0.52; only 37% of frames ≥0.05) — the small-object signature (ball ≈13 px @1080p).
+- `scripts/extract_ball.py` — full-frame ball → project → fuse. On e6 gave **16/358 frames (4.5%)** — unusable.
+- `scripts/track_ball.py` + `fusion/ball.py` — **SAHI tiling** (per-tile detection ≈3× effective ball
+  resolution) feeding a **constant-velocity Kalman ball tracker** that gates false positives and
+  interpolates gaps. Near cameras only (they see the ball + own the court). The Kalman tracker is
+  unit-tested (`tests/test_events.py`): given a real trajectory it follows it, gates FPs, interpolates.
+
+**SAHI result on e6 NR (2026-06-26) — machinery works, detector doesn't (yet).** SAHI raised raw ball
+frames 4% → **61%** and the tracker filled to 100%, BUT the raw candidates are **95% clustered within
+300 cm of one fixed point** at **median confidence 0.059** (max 0.30): the "ball" is a **persistent
+false positive** at top-center, not the moving ball. So the event deriver produces possession/pass
+events but they're proximity-flips around a pinned point — **not trustworthy**. **Conclusion:** the
+pipeline (SAHI → Kalman → events) is built and validated; the blocker is **ball-detection quality** —
+the 3-class detector can't localize this small/fast ball at usable confidence. **Next = a dedicated
+ball model** (fine-tune on ball crops from our footage, or a TrackNet-style ball-trajectory net), a
+data+training task. Tracker/threshold tuning cannot fix a clustered false positive.
+
+**Deferred (needs more than positions):** **shot make/miss** needs the rim *in image space* + the ball's
+*flight* trajectory — the planar floor homography is wrong for an elevated ball, so a court-projected
+ball can't tell a make from a miss. Rim detector exists (`runs/rfdetr-rim-near-v1`) but isn't wired in.
+Possession/pass/turnover come first (ball-on-floor, where the homography holds); shots are the next build.
