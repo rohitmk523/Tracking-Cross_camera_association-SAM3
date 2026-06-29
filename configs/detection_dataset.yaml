@@ -9,6 +9,13 @@ target_classes: [player, referee, ball]
 # (null = drop that id). Only `include: true` sources are consolidated.
 # ---------------------------------------------------------------------------
 sources:
+  - name: annotate_pool_events      # event-anchored NEAR-cam shot frames (25 games) -> strong BALL labels
+    path: data/annotate_pool_events # built 2026-06-29 from the plays table (docs/08, near basket = big ball)
+    repo_relative: true
+    include: false                  # GATE: flip to true ONLY after the operator corrects the pre-labels
+    priority: 0                     # authoritative; lower wins on duplicate frames
+    class_map: {0: player, 1: referee, 2: ball}
+
   - name: annotate_pool             # operator-APPROVED pool: 11 games, all 4 angles, ball+ref
     path: data/annotate_pool        # repo-relative (in-repo data/, not Training_frameworks)
     repo_relative: true
@@ -64,12 +71,25 @@ split_map:
   d186e25e: train
   d446fe8c: train
   e6fba750: train
-  # annotate_pool valid games (3 WHOLE held-out games -> real cross-game validation)
+  # event-pool train games (added 2026-06-29; near-cam shot frames, strong ball labels)
+  0fa23810: train
+  13e1ffad: train
+  6d601c99: train
+  77715f25: train
+  8dcb1330: train
+  b3c1f62c: train
+  cc1710c4: train
+  f66eb3b2: train
+  ee8745f1: train
+  # annotate_pool valid games (3) + 2 event-pool valid games -> stronger cross-game validation
   29b51d57: valid
   74c4f686: valid
   b68967fe: valid
-  # held-out TEST anchor (docs/14; from 4cam_detection, ball unlabeled there)
+  cc5deb39: valid
+  cd045da8: valid
+  # held-out TEST anchor (docs/14; from 4cam_detection, ball unlabeled there) + f3e7b25a
   c2a354fe: test
+  f3e7b25a: test
 
 # val_mode: keep the held-out TEST game (c2a, docs/14) truly untouched.
 #   explicit       -> valid = the WHOLE games mapped to `valid` above (real cross-game
