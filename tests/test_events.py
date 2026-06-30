@@ -15,6 +15,20 @@ from uball_cc.fusion.ball import reject_stationary, track_ball  # noqa: E402
 from uball_cc.fusion.events import derive_events  # noqa: E402
 
 
+def test_fuse_ball_candidates_rewards_cross_camera_agreement():
+    """The ball seen by 2 cameras at one court point outscores a lone single-camera FP."""
+    from uball_cc.fusion.ball_fuse import fuse_ball_candidates
+    per_cam = {
+        "NL": {5: [(1000.0, 700.0, 0.3)]},          # ball seen by NL ...
+        "NR": {5: [(1010.0, 690.0, 0.3)]},          # ... and NR at ~the same court point
+        "FL": {5: [(200.0, 200.0, 0.3)]},           # a lone false positive elsewhere
+    }
+    fused = fuse_ball_candidates(per_cam)
+    top = max(fused[5], key=lambda c: c[2])
+    assert abs(top[0] - 1005) < 50                  # the agreed ball location is the top candidate
+    assert top[2] > 0.3                             # ...with an agreement-boosted score (> a single cam)
+
+
 def test_motion_candidates_finds_moving_orange_ball():
     """Motion detection surfaces a small fast orange ball that moves against a static court."""
     import cv2
