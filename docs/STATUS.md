@@ -49,17 +49,29 @@ pipeline that:
 2. Automatically pulls the **near-camera frames at each shot** — where the ball is largest and clearest,
 3. Pre-labels them and stages them for correction.
 
-This produced **1,152 training frames across all 25 games** — **73% already carry a ball box**
-(vs ~5% before). It's running through annotation now. Once corrected → we retrain the ball
-detector → the possession/shot events **light up automatically** (that machinery is already in place).
+This produced **1,152 training frames across all 25 games** — **73% carry a ball box** (vs ~5%
+before). ~500 were annotated and we **retrained the detector on AWS GPU**.
+
+## Retrain outcome (held-out games)
+- **Ball: AP 0.80**, **referee: 0.90** (a previously-collapsing class, was ~0.04), player **0.91**.
+- Near-basket play: the ball is detected well; **possession events are now clean** (sustained
+  1–6s holds, sensible passes) on half-court sets.
+
+## The honest finding on full ball tracking
+We verified directly: **mid-court, the ball is too small to detect by appearance — even a human
+can't reliably spot it in a frame.** So more appearance-style annotation hits a ceiling there.
+The right approach is **motion-based** detection: the ball is small but moves fast against a
+near-static court, so its *motion* reveals it where its *appearance* can't. A prototype already
+finds the moving ball mid-court (candidate in 86% of frames, tracking the ball across a full fast
+break) — validated; productionized as a reusable module.
 
 ## Where we are / what's next
-- **Now:** annotating the ball training set (the only step that needs human eyes).
-- **Next:** retrain the detector on AWS GPU (pipeline wired, one command) → ball tracking works →
-  possession + passes appear.
-- **Then:** shot make/miss detection (rim model already exists), and feeding the events into the
-  narrator for maximum accuracy.
+- **Working today:** detection, tracking, fusion, narration; **near-basket / half-court ball +
+  possession events**.
+- **Next:** finish the **motion-based ball pipeline** (motion candidates fused across the 4
+  cameras for full-court coverage) → ball tracked through transitions → possession/passes
+  everywhere, not just at the basket.
 
-**One-line summary:** four of five stages are working end-to-end; the fifth (the structured "what
-happened" data) is built and gated only on better ball detection — and we've already built and
-scaled the data pipeline that fixes it.
+**One-line summary:** four of five stages work end-to-end; the fifth (structured "what happened")
+works for half-court play now, and the path to full-court ball tracking is validated
+(motion-based, prototype proven) — not blocked, just the next build.

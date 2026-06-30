@@ -15,6 +15,21 @@ from uball_cc.fusion.ball import reject_stationary, track_ball  # noqa: E402
 from uball_cc.fusion.events import derive_events  # noqa: E402
 
 
+def test_motion_candidates_finds_moving_orange_ball():
+    """Motion detection surfaces a small fast orange ball that moves against a static court."""
+    import cv2
+    from uball_cc.fusion.ball_motion import motion_candidates
+    frames = []
+    for i in range(6):
+        img = np.full((200, 400, 3), 100, np.uint8)        # static gray court
+        cv2.circle(img, (60 + i * 35, 100), 5, (20, 120, 240), -1)   # orange ball moving right
+        frames.append(img)
+    cands = motion_candidates(frames)
+    assert len(cands) >= 3                                  # detected in the interior frames
+    xs = [cands[t][0][0] for t in sorted(cands)]
+    assert xs[-1] > xs[0]                                   # candidate tracks the rightward motion
+
+
 def test_reject_stationary_drops_fixed_fp_keeps_moving_ball():
     """A fixed false positive (same court spot every frame) is removed; the moving ball kept."""
     cands = {}
