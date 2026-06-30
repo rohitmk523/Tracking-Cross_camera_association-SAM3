@@ -19,6 +19,7 @@ REPO = Path(__file__).resolve().parents[3]
 DEFAULT_WEIGHTS = str(REPO / "runs" / "rfdetr-s-1280-ourdata-v1" / "best.pth")
 DEFAULT_CALIB_DIR = REPO / "configs" / "calib"
 ZONE = {"FL": 0.6, "FR": 0.6, "NL": 1.0, "NR": 1.0}
+TEAM_CAMS = {"NL", "NR"}    # only NEAR cams vote on team (far-cam crops too small to separate teams)
 
 
 # ---------------- detect ----------------
@@ -123,7 +124,8 @@ def run_fuse(job: Job, store: JobStore, *, calib_dir: Path = DEFAULT_CALIB_DIR,
         obs = []
         for ang, sh in aligned.items():
             for t, xy in sh.get(f, []):
-                obs.append(Observation(ang, t.track_id, xy, team=t.team, jersey=t.jersey,
+                team = t.team if ang in TEAM_CAMS else None   # only near cams vote on team
+                obs.append(Observation(ang, t.track_id, xy, team=team, jersey=t.jersey,
                                        reid=reid_maps[ang].get(t.track_id), zone_conf=ZONE.get(ang, 1.0)))
         live = eng.step(f, obs)
         frames_out.append({"frame": f, "tracks": [{"global_id": t.id,

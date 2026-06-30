@@ -81,6 +81,7 @@ def main() -> int:
 
     # near cams own the court (accurate); far cams downweighted (far-field error)
     zone = {"FL": 0.6, "FR": 0.6, "NL": 1.0, "NR": 1.0}
+    TEAM_CAMS = {"NL", "NR"}    # only NEAR cams vote on team; far-cam crops are too small to separate
     # project + sync each camera onto the ref frame timeline
     aligned: dict[str, dict[int, list]] = {}
     reid_maps: dict[str, dict] = {}
@@ -109,7 +110,8 @@ def main() -> int:
         for ang, sh in aligned.items():
             zc = zone.get(ang, 1.0)
             for t, xy in sh.get(f, []):
-                obs.append(Observation(ang, t.track_id, xy, team=t.team, jersey=t.jersey,
+                team = t.team if ang in TEAM_CAMS else None
+                obs.append(Observation(ang, t.track_id, xy, team=team, jersey=t.jersey,
                                        reid=reid_maps[ang].get(t.track_id), zone_conf=zc))
                 raw.append((xy, t.team))
         live = eng.step(f, obs)

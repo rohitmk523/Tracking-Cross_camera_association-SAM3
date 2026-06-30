@@ -56,6 +56,28 @@ def _l2(x: np.ndarray) -> np.ndarray:
     return x / (np.linalg.norm(x, axis=1, keepdims=True) + 1e-8)
 
 
+def _torso_hue(crops: list[np.ndarray]) -> float | None:
+    """Median hue of saturated jersey (upper-torso) pixels across a track's crops — a
+    within-camera team signature used to map clusters -> A/B deterministically (so the near
+    cameras agree on which team is A; absolute hue still drifts across cameras, so this is
+    paired with near-camera-only team voting in the fusion)."""
+    import cv2  # noqa: PLC0415
+
+    hues = []
+    for c in crops:
+        if c.size == 0:
+            continue
+        h, w = c.shape[:2]
+        torso = c[int(h * 0.15):int(h * 0.55), int(w * 0.25):int(w * 0.75)]
+        if torso.size == 0:
+            continue
+        hsv = cv2.cvtColor(torso, cv2.COLOR_BGR2HSV)
+        m = hsv[:, :, 1] > 60
+        if int(m.sum()) > 10:
+            hues.append(float(np.median(hsv[:, :, 0][m])))
+    return float(np.median(hues)) if hues else None
+
+
 def assign_teams(video_path: str | Path, tracks: list[Track], *,
                  sample_per_track: int = 6, embedder: SiglipEmbedder | None = None,
                  seed: int = 0) -> tuple[list[Track], dict]:
@@ -79,9 +101,19 @@ def assign_teams(video_path: str | Path, tracks: list[Track], *,
 
         x = _l2(np.stack([track_mean[i] for i in ids]))
         labels = KMeans(n_clusters=2, n_init=10, random_state=seed).fit_predict(x)
-        major = Counter(labels).most_common(1)[0][0]      # larger cluster -> "A" (deterministic)
-        team_of = {tid: ("A" if labels[i] == major else "B") for i, tid in enumerate(ids)}
+        # Map clusters -> A/B by a within-camera jersey colour (median torso hue), NOT cluster
+        # size ("larger cluster" differs per camera). Lower hue -> "A". Far cameras whose crops
+        # are too small to separate teams are excluded from team voting in the fusion, so their
+        # (unreliable) labels here don't matter.
+        cl_hue = {}
+        for cl in (0, 1):
+            hs = [_torso_hue(crops_by_id.get(ids[i], [])) for i in range(len(ids)) if labels[i] == cl]
+            hs = [h for h in hs if h is not None]
+            cl_hue[cl] = float(np.median(hs)) if hs else 999.0
+        a_cluster = min(cl_hue, key=cl_hue.get)
+        team_of = {tid: ("A" if labels[i] == a_cluster else "B") for i, tid in enumerate(ids)}
         info["team_counts"] = dict(Counter(team_of.values()))
+        info["cluster_hue"] = cl_hue
     else:
         team_of = {tid: None for tid in ids}              # too few to cluster
 
