@@ -78,27 +78,25 @@ derives **possession / pass / turnover** events, which the VLM narrates over.
   over-count of transient IDs remains (far-camera calibration residual).
 - **Ball:** full-court tracking (above) — fused into the same world-state.
 - **Gap 1 — team A/B labels.** Verified against the video: the two teams are **roughly even**
-  (cyan vs dark jerseys), but the classifier outputs ~9/3 because **one team is bright cyan (easy
-  to cluster) and the other is dark and blends into the shadows** — SigLIP+KMeans mis-clusters the
-  dark team. We made the cross-camera labelling architecturally correct (hue-anchored A/B + only
-  the near cameras vote — the far cameras provably can't separate teams), but that fixes
-  *consistency*, not the dark-team clustering. The real fix is a **better team-separation method**
-  (explicit jersey-colour features, or a small trained team classifier) — a dedicated item.
-- **Gap 2 — jersey numbers.** Not yet read. Decision: **defer, then train a model — not OCR.**
+  (cyan vs dark jerseys), but SigLIP+KMeans mis-clustered the dark team (it blends into shadows).
+  **Fixed:** switched team clustering to a torso **jersey-colour feature** (`[S, V, S·cosH, S·sinH]`)
+  which separates bright-vs-dark cleanly, paired with **near-camera-only voting** (far cameras
+  provably can't separate teams, so they're excluded). e6 core split **9/3 → 5/7** (≈ even, matches
+  the video), and events read correctly (Green/Blue passes + turnovers).
+- **Gap (open) — jersey numbers.** Not yet read. Decision: **defer, then train a model — not OCR.**
   General OCR fails on tiny/fisheye/blurred numbers; a number-localizer + a trained recognizer on
-  annotated cross-game number crops (applied only on near/large crops, with voting) is the robust
-  path — the same data-driven recipe as the ball. Lower leverage than team labels, so it comes after.
+  annotated cross-game number crops (near/large crops, with voting) is the robust path — the same
+  data-driven recipe as the ball. This is the main remaining identity-quality item.
 
 ## Where we are
-- **Working:** detection, tracking, cross-camera fusion (stable player IDs + full-court ball),
-  the deterministic event stream (possession/pass/turnover), and narration — end to end.
-- **Next, in order:** (1) team A/B via global near-camera classification, (2) trim fusion
-  over-count, (3) shot make/miss (rim model exists, to be wired), (4) jersey numbers (trained),
-  (5) broaden validation across more games/clips.
+- **Working:** detection, tracking, cross-camera fusion (stable player IDs + **correct team labels**
+  + full-court ball), the deterministic event stream (possession/pass/turnover), and narration —
+  end to end.
+- **Next, in order:** (1) **jersey numbers** (trained recognizer, near/large crops + voting),
+  (2) trim the mild fusion over-count, (3) broaden validation across more games/clips.
+  _(Shot make/miss is out of scope here — that logic lives in the separate shot-detection repo.)_
 
-**One-line summary:** all five stages work end to end — four-camera video in, identified players +
-a full-court ball + a structured "what happened" event stream + descriptive play-by-play out.
-
-**One-line summary:** four of five stages work end-to-end; the fifth (structured "what happened")
-works for half-court play now, and the path to full-court ball tracking is validated
-(motion-based, prototype proven) — not blocked, just the next build.
+**One-line summary:** all five stages work end to end — four-camera video in; **identified
+players on correct teams + a full-court ball + a structured "what happened" event stream
+(possession/pass/turnover) + descriptive play-by-play** out. Remaining identity polish: jersey
+numbers (trained), and a mild fusion over-count.
