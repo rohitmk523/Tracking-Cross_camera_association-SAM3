@@ -54,11 +54,10 @@ def run_track(job: Job, store: JobStore, *, min_consecutive_frames: int = 3,
     from uball_cc.detection.base import Detection
     from uball_cc.tracking import ByteTrackTracker, Track, summarize
     from uball_cc.tracking.reid import OSNetEmbedder, default_reid_weights, track_embeddings
-    from uball_cc.tracking.teams import SiglipEmbedder, assign_teams
+    from uball_cc.tracking.teams import assign_teams
 
     det_dir, out = job.dir / "detect", job.dir / "track"
     out.mkdir(parents=True, exist_ok=True)
-    siglip = SiglipEmbedder() if team else None
     osnet = OSNetEmbedder(model_path=default_reid_weights()) if reid else None
     summary = {}
     for ang in job.angles:
@@ -70,7 +69,7 @@ def run_track(job: Job, store: JobStore, *, min_consecutive_frames: int = 3,
             tracks.extend(tracker.update(dets, fi))
         video = store.video(job, ang)
         if team and tracks:
-            tracks, _ = assign_teams(video, tracks, embedder=siglip)
+            tracks, _ = assign_teams(video, tracks)          # method="color" (no SigLIP needed)
         if reid and tracks:
             emb = track_embeddings(video, tracks, embedder=osnet)
             np.savez(out / f"{ang}_reid.npz", ids=np.array(list(emb)),
