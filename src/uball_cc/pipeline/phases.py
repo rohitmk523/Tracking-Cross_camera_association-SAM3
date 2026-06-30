@@ -142,11 +142,24 @@ def run_fuse(job: Job, store: JobStore, *, calib_dir: Path = DEFAULT_CALIB_DIR,
                for gid, r in roster.items()]
     ws = {"n_global_ids": len(players), "players": players, "frames": frames_out,
           "ref_angle": ref, "angles": job.angles}
+    # --- motion-fusion ball (full-court, docs/08) -> world-state + event stream ---
+    from uball_cc.fusion.ball_fuse import multicam_ball_trace
+    from uball_cc.fusion.events import derive_events
+    clips = {ang: str(store.video(job, ang)) for ang in job.angles}
+    ball = multicam_ball_trace(clips, str(calib_dir), ref=ref, audio_sync=audio_sync, zone=ZONE)
+    ball_xy = {int(f): v for f, v in ball.items()}
+    for fr in frames_out:
+        fr["ball"] = ball_xy.get(fr["frame"])
+    ws["ball"] = {str(f): v for f, v in ball.items()}
+    events = derive_events(ws, ball_by_frame={f: tuple(v) for f, v in ball_xy.items()}, fps=fps)
+    ws["events"] = events
     out = job.dir / "fuse"
     out.mkdir(parents=True, exist_ok=True)
     (out / "worldstate.json").write_text(json.dumps(ws))
     return {"n_global_ids": len(players), "n_frames": len(frames_out),
-            "avg_players_per_frame": round(np.mean([len(f["tracks"]) for f in frames_out]), 1) if frames_out else 0}
+            "avg_players_per_frame": round(np.mean([len(f["tracks"]) for f in frames_out]), 1) if frames_out else 0,
+            "ball_frames": len(ball), "n_events": events["summary"]["n_events"],
+            "n_passes": events["summary"]["n_passes"], "n_turnovers": events["summary"]["n_turnovers"]}
 
 
 # ---------------- vlm (world-state + video -> play-by-play) ----------------

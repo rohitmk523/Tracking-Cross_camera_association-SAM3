@@ -49,8 +49,14 @@ def narrate(video_path, world_state: dict | None = None, *, model: str | None = 
     """Grounded narration via VLM_Basketball. Returns a JSON-friendly dict."""
     narrate_clip = _narrate_clip()
     context = _grounding(world_state)
+    # docs/08: let the VLM narrate OVER the deterministic CV event stream (possession/pass/
+    # turnover/transition), not just positions — the structured "what happened" the pipeline built.
+    events = None
+    ev = (world_state or {}).get("events")
+    if isinstance(ev, dict) and ev.get("events"):
+        events = ev["events"]
     result = narrate_clip(str(video_path), api_key=api_key, model=model, fps=fps,
-                          media_resolution=media_resolution, events=None, context=context)
+                          media_resolution=media_resolution, events=events, context=context)
     d = result.model_dump()
     return {
         "model": d["model"], "fps": d["fps"], "media_resolution": d["media_resolution"],

@@ -56,3 +56,45 @@ def fuse_ball_candidates(per_cam: dict[str, dict[int, list[tuple]]],
             fused.append((round(c["cen"][0], 1), round(c["cen"][1], 1), round(score, 3)))
         out[f] = fused
     return out
+
+
+def multicam_ball_trace(clips: dict[str, str], calib_dir: str, *, angles: list[str] | None = None,
+                        ref: str = "NR", region_pad: float = 500.0, audio_sync: bool = True,
+                        fps: float = 29.97, zone: dict[str, float] | None = None) -> dict[int, list]:
+    """{angle: clip_path} + calib dir -> {frame: [court_x, court_y]} fused ball trace.
+
+    The whole multi-camera motion pipeline in one call: per-camera 3-frame motion candidates ->
+    project to court -> region-gate -> audio-sync to `ref` -> cross-camera agreement fusion ->
+    stationarity filter -> Kalman track. Reused by the 4-cam driver and the pipeline fuse stage."""
+    from pathlib import Path
+
+    from ..tracking import iter_video_frames
+    from .audiosync import audio_offset_seconds
+    from .ball import reject_stationary, track_ball
+    from .ball_motion import motion_candidates
+    from .homography import (calib_hull, homography_from_calib, in_calib_region, load_calib, project)
+
+    angles = angles or list(clips)
+    zone = zone or {}
+    ref_clip = clips.get(ref)
+    per_cam: dict[str, dict[int, list[tuple]]] = {}
+    for ang in angles:
+        cp = clips.get(ang)
+        if not cp or not Path(cp).exists():
+            continue
+        calib = load_calib(Path(calib_dir) / f"{ang}.json")
+        h, hull = homography_from_calib(calib), calib_hull(calib)
+        cand_img = motion_candidates(list(iter_video_frames(str(cp))))
+        off_f = 0
+        if audio_sync and ref_clip and ang != ref:
+            off_s, _peak = audio_offset_seconds(str(ref_clip), str(cp))
+            off_f = int(round(off_s * fps))
+        zc = zone.get(ang, 1.0)
+        court: dict[int, list[tuple]] = {}
+        for fi, cands in cand_img.items():
+            for (cx, cy), (_x, _y, s) in zip(project([(x, y) for x, y, _ in cands], h), cands):
+                if in_calib_region((cx, cy), hull, region_pad):
+                    court.setdefault(fi - off_f, []).append((float(cx), float(cy), float(s) * zc))
+        per_cam[ang] = court
+    fused, _banned = reject_stationary(fuse_ball_candidates(per_cam))
+    return track_ball(fused, fps=fps, reinit_score=0.5)
