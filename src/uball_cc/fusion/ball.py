@@ -51,17 +51,21 @@ def reject_stationary(candidates_by_frame: dict[int, list[tuple]]) -> tuple[dict
     return out, centers
 
 
-def _best_in_gate(cands, pred):
+def _best_in_gate(cands, pred, gate_cm=GATE_CM):
     ing = [(c, float(np.hypot(c[0] - pred[0], c[1] - pred[1]))) for c in cands]
-    ing = [(c, d) for c, d in ing if d <= GATE_CM]
+    ing = [(c, d) for c, d in ing if d <= gate_cm]
     return min(ing, key=lambda cd: cd[1])[0] if ing else None
 
 
-def track_ball(candidates_by_frame: dict[int, list[tuple]], fps: float = 29.97) -> dict[int, list]:
+def track_ball(candidates_by_frame: dict[int, list[tuple]], fps: float = 29.97, *,
+               gate_cm: float = GATE_CM, max_coast: int = MAX_COAST,
+               reinit_score: float = REINIT_SCORE, reinit_frames: int = REINIT_FRAMES) -> dict[int, list]:
     """{frame: [(court_x, court_y, score), ...]} (court cm) -> {frame: [x, y]} clean trace.
 
     A frame appears in the output only while the ball is actively tracked (real detection
-    in-gate, or a short coast). Long gaps are left empty rather than hallucinated."""
+    in-gate, or a short coast). Long gaps are left empty rather than hallucinated. For the
+    multi-camera fused pipeline pass a higher `reinit_score` so a re-acquire requires
+    CROSS-CAMERA AGREEMENT, not a single-camera blip (prevents end-of-clip teleport glitches)."""
     if not candidates_by_frame:
         return {}
     f0, f1 = min(candidates_by_frame), max(candidates_by_frame)
@@ -80,7 +84,7 @@ def track_ball(candidates_by_frame: dict[int, list[tuple]], fps: float = 29.97) 
             continue
         kf.predict()
         pred = kf.pos
-        pick = _best_in_gate(cands, pred)
+        pick = _best_in_gate(cands, pred, gate_cm)
         if pick is not None:
             kf.update((pick[0], pick[1]), weight=float(np.clip(pick[2] * 3.0, 0.3, 1.5)))
             p = kf.pos
@@ -89,19 +93,23 @@ def track_ball(candidates_by_frame: dict[int, list[tuple]], fps: float = 29.97) 
             continue
         # no in-gate detection: coast, and watch for a persistent far detection (real jump)
         coast += 1
-        if coast <= MAX_COAST:
+        if coast <= max_coast:
             trace[f] = [round(float(pred[0]), 1), round(float(pred[1]), 1)]
-        strong = [c for c in cands if c[2] >= REINIT_SCORE]
-        if strong:
+        # a re-acquire needs the strong candidates CLUSTERED (a real ball at a new spot), not
+        # scattered noise that merely happens to be strong on different frames.
+        strong = [c for c in cands if c[2] >= reinit_score]
+        if strong and (not strong_run or
+                       np.hypot(strong_run[-1][0] - max(strong, key=lambda c: c[2])[0],
+                                strong_run[-1][1] - max(strong, key=lambda c: c[2])[1]) <= gate_cm):
             strong_run.append(max(strong, key=lambda c: c[2]))
-            if len(strong_run) >= REINIT_FRAMES:
+            if len(strong_run) >= reinit_frames:
                 s = strong_run[-1]
                 kf = CVKalman2D((s[0], s[1]), dt=1.0 / fps)
                 trace[f] = [round(s[0], 1), round(s[1], 1)]
                 coast, strong_run = 0, []
         else:
-            strong_run = []
-        if coast > MAX_COAST and not strong_run:
+            strong_run = [max(strong, key=lambda c: c[2])] if strong else []
+        if coast > max_coast and not strong_run:
             kf = None                                    # lost; re-acquire on the next detection
             coast = 0
     return trace

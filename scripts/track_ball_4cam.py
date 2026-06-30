@@ -78,7 +78,9 @@ def main() -> int:
     fused = fuse_ball_candidates(per_cam)
     n_multi = sum(1 for v in fused.values() for c in v if c[2] > 0.3)  # rough agreement signal
     fused, banned = reject_stationary(fused)
-    trace = track_ball(fused)
+    # reinit_score 0.5 => a re-acquire needs cross-camera AGREEMENT (a single-cam blip scores
+    # ~0.18-0.3; a >=2-cam cluster scores ~1+), preventing end-of-clip teleport glitches.
+    trace = track_ball(fused, reinit_score=0.5)
     print(f"\nfused candidate frames: {len(fused)} | banned {len(banned)} stationary | "
           f"tracked: {len(trace)} frames", flush=True)
     if trace:
