@@ -19,6 +19,8 @@ from .court import CENTER, LENGTH
 # --- tunables (court cm / seconds) ---
 POSS_RADIUS_CM = 180.0          # a player within this of the ball is a possession candidate
 MIN_POSS_FRAMES = 8             # frames a player must hold nearest-to-ball to confirm possession
+STICKY_MARGIN_CM = 70.0         # holder KEEPS possession unless a challenger is this much closer (hysteresis)
+SWITCH_FRAMES = 6               # ...and stays clearly-closest this many consecutive frames -> kills jitter
 PASS_MAX_GAP_FRAMES = 30        # max gap between two possessions to call it a pass (not a reset)
 FASTBREAK_CM = 800.0            # team-centroid x travel to flag a transition
 FASTBREAK_WINDOW_S = 2.0        # ...within this window
@@ -45,19 +47,41 @@ def _roster_label(world_state: dict) -> dict[int, str]:
 
 
 def _possession_runs(frames, by_frame, ball_by_frame):
-    """[(start_frame, end_frame, gid, team)] from nearest-player-to-ball, temporally voted."""
+    """[(start_frame, end_frame, gid, team)] — STICKY nearest-player-to-ball.
+
+    Plain nearest-player jitters when players bunch around the ball (every tiny ball
+    wobble flips the 'holder'), spawning fake sub-second passes. Hysteresis fixes it: the
+    current holder keeps possession unless a *challenger* is closer by STICKY_MARGIN_CM and
+    stays clearly-closest for SWITCH_FRAMES consecutive frames."""
     raw = {}
+    holder, holder_team = None, None
+    challenger, ch_count = None, 0
     for f in frames:
         ball = ball_by_frame.get(f)
         if ball is None:
+            holder, holder_team, challenger, ch_count = None, None, None, 0
             continue
-        best, bestd = None, POSS_RADIUS_CM
-        for gid, p in by_frame[f].items():
-            d = float(np.hypot(p["xy"][0] - ball[0], p["xy"][1] - ball[1]))
-            if d < bestd:
-                best, bestd = gid, d
-        if best is not None:
-            raw[f] = (best, by_frame[f][best]["team"])
+        dists = {gid: float(np.hypot(p["xy"][0] - ball[0], p["xy"][1] - ball[1]))
+                 for gid, p in by_frame[f].items()}
+        if not dists:
+            continue
+        nearest = min(dists, key=dists.get)
+        if dists[nearest] > POSS_RADIUS_CM:                 # ball is loose -> no possession
+            holder, holder_team, challenger, ch_count = None, None, None, 0
+            continue
+        keep = (holder is not None and holder in dists
+                and dists[holder] <= POSS_RADIUS_CM
+                and dists[holder] <= dists[nearest] + STICKY_MARGIN_CM)
+        if keep:
+            challenger, ch_count = None, 0                  # holder stays sticky
+        else:
+            ch_count = ch_count + 1 if nearest == challenger else 1
+            challenger = nearest
+            if holder is None or ch_count >= SWITCH_FRAMES:  # confirmed takeover
+                holder, holder_team = nearest, by_frame[f][nearest]["team"]
+                challenger, ch_count = None, 0
+        if holder is not None:                              # survives a 1-frame holder dropout
+            raw[f] = (holder, holder_team)
     # collapse consecutive same-holder frames into runs, then drop runs shorter than MIN_POSS_FRAMES
     runs, cur = [], None
     for f in frames:
