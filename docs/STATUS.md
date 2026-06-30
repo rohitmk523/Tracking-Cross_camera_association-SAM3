@@ -57,20 +57,29 @@ before). ~500 were annotated and we **retrained the detector on AWS GPU**.
 - Near-basket play: the ball is detected well; **possession events are now clean** (sustained
   1–6s holds, sensible passes) on half-court sets.
 
-## The honest finding on full ball tracking
-We verified directly: **mid-court, the ball is too small to detect by appearance — even a human
-can't reliably spot it in a frame.** So more appearance-style annotation hits a ceiling there.
-The right approach is **motion-based** detection: the ball is small but moves fast against a
-near-static court, so its *motion* reveals it where its *appearance* can't. A prototype already
-finds the moving ball mid-court (candidate in 86% of frames, tracking the ball across a full fast
-break) — validated; productionized as a reusable module.
+## Full-court ball tracking — built and working
+The honest blocker turned out to be that **mid-court the ball is too small to detect by
+appearance — even a human can't reliably spot it in a single frame.** The answer is
+**motion-based** detection: the ball is small but moves fast against a near-static court, so its
+*motion* reveals it where its appearance can't. We built and validated the full pipeline:
+1. **Per-camera motion detection** (3-frame differencing) — finds the moving ball mid-court.
+2. **Cross-camera fusion by agreement** — the real ball appears at one court point in ≥2 cameras;
+   a per-camera false positive appears in only one. Agreement both locates and confirms the ball.
+3. **Audio-sync + Kalman track** — on a real fast break, the 4-camera fusion tracks the ball in a
+   **smooth curve up the full court** (single camera managed a fraction of that), and the
+   audio-sync validated itself against the rig's known camera offset.
 
-## Where we are / what's next
-- **Working today:** detection, tracking, fusion, narration; **near-basket / half-court ball +
-  possession events**.
-- **Next:** finish the **motion-based ball pipeline** (motion candidates fused across the 4
-  cameras for full-court coverage) → ball tracked through transitions → possession/passes
-  everywhere, not just at the basket.
+It's **wired into the pipeline**: the fuse stage now writes the ball into the world-state and
+derives **possession / pass / turnover** events, which the VLM narrates over.
+
+## Where we are
+- **Working:** detection, tracking, cross-camera fusion, full-court ball tracking, the
+  deterministic event stream (possession/pass/turnover), and narration — end to end.
+- **Polish:** broaden validation across more games/clips; tighten event thresholds; shot
+  make/miss (rim model exists, to be wired).
+
+**One-line summary:** all five stages work end to end — four-camera video in, identified players +
+a full-court ball + a structured "what happened" event stream + descriptive play-by-play out.
 
 **One-line summary:** four of five stages work end-to-end; the fifth (structured "what happened")
 works for half-court play now, and the path to full-court ball tracking is validated
