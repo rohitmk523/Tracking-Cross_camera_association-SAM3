@@ -56,10 +56,11 @@ def _frame_token(stem: str, angle: str | None) -> str:
     return "_".join(parts[1:]) or "f0"
 
 
-def _iter_source_frames(root: Path):
+def _iter_source_frames(root: Path, approved: set[str] | None = None):
     """Yield (image_path, label_path) for non-symlinked train/valid/val splits, or a
     FLAT images/labels layout at the source root (e.g. the annotation pool). The source
-    sub-dir is just where frames live; the FINAL split is decided by split_map per game."""
+    sub-dir is just where frames live; the FINAL split is decided by split_map per game.
+    If `approved` is given, yield ONLY frames whose stem is in it (operator-reviewed)."""
     layouts = [(root / sp / "images", root / sp / "labels") for sp in ("train", "valid", "val")]
     layouts.append((root / "images", root / "labels"))        # flat pool layout
     for img_dir, lab_dir in layouts:
@@ -67,6 +68,8 @@ def _iter_source_frames(root: Path):
             continue
         for img in sorted(img_dir.iterdir()):
             if img.suffix.lower() not in (".jpg", ".jpeg", ".png"):
+                continue
+            if approved is not None and img.stem not in approved:
                 continue
             yield img, lab_dir / f"{img.stem}.txt"
 
@@ -132,7 +135,14 @@ def collect_frames(cfg: dict, tf_root: Path, games: dict[str, GameInfo],
         id_to_canonical = {int(k): name_to_id[v] for k, v in cmap.items()
                            if v in name_to_id}
         prio = src.get("priority", 99)
-        for img, lab in _iter_source_frames(root):
+        approved = None
+        if src.get("approved_only"):                # train ONLY on operator-reviewed frames
+            sf = root / "review_state.json"
+            st = json.loads(sf.read_text()) if sf.exists() else {}
+            approved = {k for k, v in st.items() if v.get("status") == "approved"}
+            report.warnings.append(
+                f"{src['name']}: approved_only -> {len(approved)} reviewed frames admitted")
+        for img, lab in _iter_source_frames(root, approved):
             game_key, angle = parse_stem(img.stem)
             gi = resolve_game(game_key, games)
             if gi is None:                          # OUR-DATA gate: account, don't hide
