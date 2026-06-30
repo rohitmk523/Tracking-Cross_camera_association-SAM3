@@ -22,7 +22,7 @@
 </div>
 <div id="wrap"><canvas id="c"></canvas></div>
 <div id="help">
-  <kbd>1</kbd>player <kbd>2</kbd>referee <kbd>3</kbd>ball &nbsp; drag=new box, click=select &nbsp;
+  <kbd>1</kbd>player <kbd>2</kbd>referee <kbd>3</kbd>ball &nbsp; drag=new box (even inside another), click=select smallest &nbsp;
   <kbd>D</kbd>/<kbd>Del</kbd>delete <kbd>U</kbd>undo &nbsp; <kbd>A</kbd>approve+next <kbd>S</kbd>save
   <kbd>N</kbd>/<kbd>→</kbd>next <kbd>P</kbd>/<kbd>←</kbd>prev <kbd>G</kbd>next-pending
 </div>
@@ -54,7 +54,7 @@ function redraw(){
     ctx.fillStyle=CLS[b.cls][1]; ctx.font='12px system-ui';
     ctx.fillText(CLS[b.cls][0].toLowerCase(), x1+2, y1-3);
   });
-  if(drag){ctx.lineWidth=2;ctx.strokeStyle=CLS[drawCls][1];ctx.setLineDash([5,3]);
+  if(drag&&drag.moved){ctx.lineWidth=2;ctx.strokeStyle=CLS[drawCls][1];ctx.setLineDash([5,3]);
     const [x1,y1]=toCanvas(drag.x0,drag.y0),[x2,y2]=toCanvas(drag.x1,drag.y1);
     ctx.strokeRect(x1,y1,x2-x1,y2-y1);ctx.setLineDash([]);}
 }
@@ -75,19 +75,32 @@ async function save(approve){
   if(approve && d.next_pending>=0) load(d.next_pending);
   else { const sp=document.getElementById('statusp'); if(approve){sp.textContent='approved';sp.className='pill app';} }
 }
+const CLICK_TOL=4;  // image-px movement below which a press is a CLICK (select), not a DRAG (draw)
 cv.addEventListener('mousedown',e=>{
   const [ix,iy]=toImg(e.offsetX,e.offsetY);
-  for(let i=boxes.length-1;i>=0;i--){const b=boxes[i];
-    if(Math.abs(ix-b.cx*iw)<b.w*iw/2 && Math.abs(iy-b.cy*ih)<b.h*ih/2){sel=i;drawCls=b.cls;setDrawCls();redraw();return;}}
-  drag={x0:ix,y0:iy,x1:ix,y1:iy};
+  drag={x0:ix,y0:iy,x1:ix,y1:iy,moved:false};   // always start a potential draw; mouseup decides
 });
-cv.addEventListener('mousemove',e=>{if(drag){const [ix,iy]=toImg(e.offsetX,e.offsetY);drag.x1=ix;drag.y1=iy;redraw();}});
+cv.addEventListener('mousemove',e=>{
+  if(!drag)return;
+  const [ix,iy]=toImg(e.offsetX,e.offsetY); drag.x1=ix; drag.y1=iy;
+  if(Math.abs(ix-drag.x0)>CLICK_TOL||Math.abs(iy-drag.y0)>CLICK_TOL)drag.moved=true;
+  redraw();
+});
 cv.addEventListener('mouseup',()=>{
-  if(drag){const x1=Math.min(drag.x0,drag.x1),x2=Math.max(drag.x0,drag.x1),
-    y1=Math.min(drag.y0,drag.y1),y2=Math.max(drag.y0,drag.y1);
+  if(!drag)return;
+  if(drag.moved){                                 // DRAG -> new box (works inside any other box)
+    const x1=Math.min(drag.x0,drag.x1),x2=Math.max(drag.x0,drag.x1),
+      y1=Math.min(drag.y0,drag.y1),y2=Math.max(drag.y0,drag.y1);
     if((x2-x1)>3&&(y2-y1)>3){boxes.push({cls:drawCls,cx:(x1+x2)/2/iw,cy:(y1+y2)/2/ih,
       w:(x2-x1)/iw,h:(y2-y1)/ih});sel=boxes.length-1;setDirty(true);}
-    drag=null;redraw();}
+  } else {                                         // CLICK -> select the SMALLEST box under the cursor
+    let best=-1,bestArea=Infinity;
+    for(let i=0;i<boxes.length;i++){const b=boxes[i];
+      if(Math.abs(drag.x0-b.cx*iw)<b.w*iw/2 && Math.abs(drag.y0-b.cy*ih)<b.h*ih/2 && b.w*b.h<bestArea){
+        bestArea=b.w*b.h; best=i;}}
+    sel=best; if(best>=0){drawCls=boxes[best].cls;setDrawCls();}
+  }
+  drag=null;redraw();
 });
 document.addEventListener('keydown',async e=>{
   if(e.key==='a'||e.key==='A') save(true);
