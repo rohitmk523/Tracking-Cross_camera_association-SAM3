@@ -77,11 +77,13 @@ derives **possession / pass / turnover** events, which the VLM narrates over.
   4 cameras through the whole clip. The hard part (one-ID-per-player across views) works; a mild
   over-count of transient IDs remains (far-camera calibration residual).
 - **Ball:** full-court tracking (above) — fused into the same world-state.
-- **Gap 1 — team A/B labels.** The classifier is per-camera, and the **far cameras can't separate
-  the two teams** (player crops too small/low-detail → they label nearly everyone one team), which
-  skews the fused vote. The real fix is **global team classification on the near cameras only**
-  (a focused refactor, not a one-line patch — a quick color heuristic was tried and reverted as
-  insufficient). Until then, players carry an approximate A/B.
+- **Gap 1 — team A/B labels.** Verified against the video: the two teams are **roughly even**
+  (cyan vs dark jerseys), but the classifier outputs ~9/3 because **one team is bright cyan (easy
+  to cluster) and the other is dark and blends into the shadows** — SigLIP+KMeans mis-clusters the
+  dark team. We made the cross-camera labelling architecturally correct (hue-anchored A/B + only
+  the near cameras vote — the far cameras provably can't separate teams), but that fixes
+  *consistency*, not the dark-team clustering. The real fix is a **better team-separation method**
+  (explicit jersey-colour features, or a small trained team classifier) — a dedicated item.
 - **Gap 2 — jersey numbers.** Not yet read. Decision: **defer, then train a model — not OCR.**
   General OCR fails on tiny/fisheye/blurred numbers; a number-localizer + a trained recognizer on
   annotated cross-game number crops (applied only on near/large crops, with voting) is the robust
