@@ -15,7 +15,11 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from dedupe_ball_player import dedupe_lines  # noqa: E402  (sibling script)
 
 REPO = Path(__file__).resolve().parents[1]
 TF = REPO.parent / "Training_frameworks"
@@ -90,6 +94,9 @@ def main() -> int:
             if int(bd.class_id[j]) == 0:
                 lines.append(_yolo_line(BALL, bd.xyxy[j], w, h))
                 n["ball"] += 1
+        # the player detector stamps a ball-sized 'player' box on the ball -> drop it
+        lines, dropped = dedupe_lines(lines)
+        n["player"] -= dropped
         out.write_text("\n".join(lines) + ("\n" if lines else ""))
         n["images"] += 1
         if i % 100 == 0:
