@@ -86,7 +86,11 @@ def main() -> int:
         print(f"  {ang}: ball candidates in {n_hit} frames (grid {cols}x{rows})", flush=True)
 
     n_cand_frames = len(candidates)
-    trace = track_ball({f: c for f, c in candidates.items()})
+    from uball_cc.fusion.ball import reject_stationary
+    candidates, banned = reject_stationary({f: c for f, c in candidates.items()})
+    if banned:
+        print(f"stationarity filter: dropped {len(banned)} fixed-FP cell(s) @ {banned[:3]}", flush=True)
+    trace = track_ball(candidates)
     print(f"raw candidate frames: {n_cand_frames}  ->  tracked ball frames: {len(trace)}", flush=True)
 
     dest = Path(a.out) if a.out else Path("runs/tracking") / f"{a.game}_ball_tracked.json"

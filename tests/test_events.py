@@ -11,8 +11,21 @@ import numpy as np
 import pytest
 
 pytest.importorskip("scipy")
-from uball_cc.fusion.ball import track_ball  # noqa: E402
+from uball_cc.fusion.ball import reject_stationary, track_ball  # noqa: E402
 from uball_cc.fusion.events import derive_events  # noqa: E402
+
+
+def test_reject_stationary_drops_fixed_fp_keeps_moving_ball():
+    """A fixed false positive (same court spot every frame) is removed; the moving ball kept."""
+    cands = {}
+    for f in range(60):
+        cands[f] = [(900.0, 600.0, 0.10),                 # fixed FP — same cell all clip
+                    (500.0 + 25 * f, 700.0, 0.10)]        # real ball moving across the court
+    filt, banned = reject_stationary(cands)
+    assert len(banned) == 1                                # exactly the FP cell flagged
+    flat = [c for v in filt.values() for c in v]
+    assert all(abs(c[0] - 900.0) > 80 or abs(c[1] - 600.0) > 80 for c in flat)  # no FP survives
+    assert any(c[0] > 1500 for c in flat)                  # late moving-ball positions kept
 
 
 def test_ball_tracker_gates_false_positives_and_interpolates():

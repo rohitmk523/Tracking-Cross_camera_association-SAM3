@@ -11,6 +11,8 @@ score — decides which detection is the ball.
 """
 from __future__ import annotations
 
+from collections import defaultdict
+
 import numpy as np
 
 from .kalman import CVKalman2D
@@ -19,6 +21,34 @@ GATE_CM = 250.0          # a detection within this of the prediction is a candid
 MAX_COAST = 12           # frames to interpolate with the prediction before declaring the ball lost
 REINIT_SCORE = 0.2       # a detection this strong, far from the track, can seed a re-init
 REINIT_FRAMES = 3        # ...if it persists this many frames (a real pass/inbound, not a blip)
+STATIONARY_CELL_CM = 80.0    # fine court grid: a fixed FP lands in one cell, a moving ball spreads
+STATIONARY_MAX_OCC = 0.35    # reject a cell whose detections span > this fraction of the clip's frames
+
+
+def reject_stationary(candidates_by_frame: dict[int, list[tuple]]) -> tuple[dict, list]:
+    """Drop candidates fixed at one court spot across most of the clip — a real ball MOVES;
+    a persistent same-cell detection is a fixed false positive (logo / marking / ball-coloured
+    object). Returns (filtered_candidates, [banned_cell_centers]). Distinguishes a fixed FP from
+    a genuinely-held ball: a held ball still passes/dribbles across cells, so no single fine cell
+    is occupied in >STATIONARY_MAX_OCC of frames; a rock-steady FP concentrates in one cell."""
+    if not candidates_by_frame:
+        return candidates_by_frame, []
+    span = max(1, max(candidates_by_frame) - min(candidates_by_frame) + 1)
+    cell_frames: dict[tuple, set] = defaultdict(set)
+    for f, cands in candidates_by_frame.items():
+        for (x, y, _s) in cands:
+            cell_frames[(round(x / STATIONARY_CELL_CM), round(y / STATIONARY_CELL_CM))].add(f)
+    banned = {c for c, fr in cell_frames.items() if len(fr) / span > STATIONARY_MAX_OCC}
+    if not banned:
+        return candidates_by_frame, []
+    out: dict[int, list] = {}
+    for f, cands in candidates_by_frame.items():
+        kept = [c for c in cands
+                if (round(c[0] / STATIONARY_CELL_CM), round(c[1] / STATIONARY_CELL_CM)) not in banned]
+        if kept:
+            out[f] = kept
+    centers = [(round(cx * STATIONARY_CELL_CM), round(cy * STATIONARY_CELL_CM)) for cx, cy in banned]
+    return out, centers
 
 
 def _best_in_gate(cands, pred):
