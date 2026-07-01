@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Jersey-NUMBER annotation tool (docs/05): label each large player crop with its number.
+"""Jersey-NUMBER annotation tool (docs/05): draw a tight box around the number AND type it.
 
-Crops come from scripts/extract_jersey_crops.py. The operator types the number (or marks
-'none'/'unclear' for occluded/back-turned/blurred crops -- expected to be many on this
-fisheye footage). Labels -> <pool>/labels.json, which feeds the number-recogniser training.
+The box does double duty: it trains a number-LOCALIZER (the stock e6 one doesn't generalize)
+and gives the recogniser a clean number crop. Draw the box on the visible number (front number
+sits low-right of the team name; back number is centred). Mark 'none'/'unclear' when no number
+is legible (common on this fisheye footage). Labels -> <pool>/labels.json:
+  {crop: {"number": "11", "box": [x1,y1,x2,y2]}}  (box normalised 0..1 to the crop; null if none)
 
   python scripts/annotate_jersey.py --pool data/jersey_pool        # http://127.0.0.1:8003
 """
@@ -19,29 +21,46 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 UI = """<!doctype html><html><head><meta charset=utf-8><title>Jersey #</title><style>
 body{margin:0;background:#111;color:#ddd;font:15px system-ui;height:100vh;display:flex;flex-direction:column;align-items:center}
-#bar{padding:8px;display:flex;gap:10px;align-items:center}.pill{background:#262626;border-radius:10px;padding:3px 10px}
-#wrap{flex:1;display:flex;align-items:center}img{max-height:70vh;border:1px solid #333;background:#000}
+#bar{padding:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}.pill{background:#262626;border-radius:10px;padding:3px 10px}
+#wrap{flex:1;display:flex;align-items:center}canvas{border:1px solid #333;background:#000;cursor:crosshair}
 input{font-size:22px;width:90px;text-align:center;padding:6px;border-radius:8px;border:1px solid #444;background:#1a1a1a;color:#fff}
 kbd{background:#333;border-radius:4px;padding:1px 5px}#help{padding:6px;color:#999;font-size:12px}
 button{font-size:14px;padding:6px 10px;border-radius:8px;border:1px solid #444;background:#222;color:#ddd;cursor:pointer}
-</style></head><body>
+b#need{color:#fd6}</style></head><body>
 <div id=bar><span class=pill id=pos>-/-</span><span class=pill id=done>0 labeled</span>
 <input id=num placeholder="#" autocomplete=off>
-<button onclick="save(document.getElementById('num').value)">save</button>
+<span class=pill>box: <b id=need>draw one</b></span>
+<button onclick="save(num.value)">save (Enter)</button>
 <button onclick="save('none')">none (n)</button><button onclick="save('unclear')">unclear (u)</button></div>
-<div id=wrap><img id=img></div>
-<div id=help><kbd>0-9</kbd>type number <kbd>Enter</kbd>save+next <kbd>n</kbd>none <kbd>u</kbd>unclear <kbd>&larr;/&rarr;</kbd>prev/next <kbd>g</kbd>next-unlabeled</div>
+<div id=wrap><canvas id=cv></canvas></div>
+<div id=help><kbd>drag</kbd>box around the number <kbd>0-9</kbd>type it <kbd>Enter</kbd>save+next
+ <kbd>n</kbd>none <kbd>u</kbd>unclear <kbd>c</kbd>clear box <kbd>&larr;/&rarr;</kbd>prev/next <kbd>g</kbd>next-unlabeled</div>
 <script>
-let i=0,total=0;
-async function load(j){const r=await fetch('/api/item/'+j);const d=await r.json();i=d.idx;total=d.total;
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d'),num=document.getElementById('num');
+let i=0,total=0,img=new Image(),box=null,drag=null,sc=1,ox=0,oy=0,iw=0,ih=0;
+function draw(){ctx.clearRect(0,0,cv.width,cv.height);ctx.drawImage(img,ox,oy,iw*sc,ih*sc);
+ const b=drag||box; if(b){ctx.lineWidth=2;ctx.strokeStyle=drag?'#3af':'#3f6';ctx.setLineDash(drag?[5,3]:[]);
+  ctx.strokeRect(ox+b.x1*iw*sc,oy+b.y1*ih*sc,(b.x2-b.x1)*iw*sc,(b.y2-b.y1)*ih*sc);ctx.setLineDash([]);}
+ document.getElementById('need').textContent=box?'set ✓':'draw one';document.getElementById('need').style.color=box?'#6f6':'#fd6';}
+function toImg(e){const r=cv.getBoundingClientRect();return [((e.clientX-r.left)-ox)/(iw*sc),((e.clientY-r.top)-oy)/(ih*sc)];}
+cv.onmousedown=e=>{const[x,y]=toImg(e);drag={x1:x,y1:y,x2:x,y2:y};};
+cv.onmousemove=e=>{if(!drag)return;const[x,y]=toImg(e);drag.x2=x;drag.y2=y;draw();};
+cv.onmouseup=e=>{if(!drag)return;let{x1,y1,x2,y2}=drag;drag=null;
+ if(Math.abs(x2-x1)>0.02&&Math.abs(y2-y1)>0.02)box={x1:Math.min(x1,x2),y1:Math.min(y1,y2),x2:Math.max(x1,x2),y2:Math.max(y1,y2)};draw();};
+async function load(j){const d=await(await fetch('/api/item/'+j)).json();i=d.idx;total=d.total;
  document.getElementById('pos').textContent=(i+1)+'/'+total;document.getElementById('done').textContent=d.done+' labeled';
- document.getElementById('img').src='/crop/'+i+'?t='+Date.now();
- document.getElementById('num').value=(d.label&&d.label!=='none'&&d.label!=='unclear')?d.label:'';document.getElementById('num').focus();}
-async function save(v){await fetch('/api/save/'+i,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label:String(v).trim()})});
+ const b=d.label&&d.label.box; box=b?{x1:b[0],y1:b[1],x2:b[2],y2:b[3]}:null;
+ num.value=(d.label&&d.label.number&&!['none','unclear'].includes(d.label.number))?d.label.number:'';
+ img=new Image();img.onload=()=>{const MH=620;sc=Math.min(MH/img.height,2.5);iw=img.width;ih=img.height;
+  cv.width=iw*sc;cv.height=ih*sc;ox=0;oy=0;draw();num.focus();};img.src='/crop/'+i+'?t='+Date.now();}
+async function save(v){v=String(v).trim();
+ const payload={number:v,box:(box&&!['none','unclear'].includes(v))?[box.x1,box.y1,box.x2,box.y2]:null};
+ await fetch('/api/save/'+i,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
  if(i<total-1)load(i+1);else load(i);}
-document.addEventListener('keydown',e=>{const a=document.activeElement===document.getElementById('num');
- if(e.key==='Enter'){save(document.getElementById('num').value);e.preventDefault();}
+document.addEventListener('keydown',e=>{const a=document.activeElement===num;
+ if(e.key==='Enter'){save(num.value);e.preventDefault();}
  else if(e.key==='n'&&!a)save('none');else if(e.key==='u'&&!a)save('unclear');
+ else if(e.key==='c'&&!a){box=null;draw();}
  else if(e.key==='ArrowRight'){if(i<total-1)load(i+1);}else if(e.key==='ArrowLeft'){if(i>0)load(i-1);}
  else if(e.key==='g'&&!a)fetch('/api/next_unlabeled?after='+i).then(r=>r.json()).then(d=>{if(d.idx>=0)load(d.idx);});});
 load(0);
@@ -57,7 +76,11 @@ def _items():
 
 def _labels():
     p = POOL / "labels.json"
-    return json.loads(p.read_text()) if p.exists() else {}
+    if not p.exists():
+        return {}
+    raw = json.loads(p.read_text())
+    # migrate old string labels (number-only, no box) -> dict form
+    return {k: (v if isinstance(v, dict) else {"number": v, "box": None}) for k, v in raw.items()}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -73,14 +96,13 @@ def crop(i: int):
 @app.get("/api/item/{i}")
 def item(i: int):
     items, labels = _items(), _labels()
-    return {"idx": i, "total": len(items), "done": len(labels),
-            "label": labels.get(items[i]["crop"]), "crop": items[i]["crop"]}
+    return {"idx": i, "total": len(items), "done": len(labels), "label": labels.get(items[i]["crop"])}
 
 
 @app.post("/api/save/{i}")
 async def save(i: int, body: dict):
     items, labels = _items(), _labels()
-    labels[items[i]["crop"]] = body.get("label", "")
+    labels[items[i]["crop"]] = {"number": body.get("number", ""), "box": body.get("box")}
     (POOL / "labels.json").write_text(json.dumps(labels))
     return JSONResponse({"done": len(labels)})
 
