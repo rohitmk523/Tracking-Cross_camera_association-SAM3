@@ -34,10 +34,10 @@ b#need{color:#fd6}</style></head><body>
 <button onclick="save('none')">none (n)</button><button onclick="save('unclear')">unclear (u)</button></div>
 <div id=wrap><canvas id=cv></canvas></div>
 <div id=help><kbd>drag</kbd>box around the number <kbd>0-9</kbd>type it <kbd>Enter</kbd>save+next
- <kbd>n</kbd>none <kbd>u</kbd>unclear <kbd>c</kbd>clear box <kbd>&larr;/&rarr;</kbd>prev/next <kbd>g</kbd>next-unlabeled</div>
+ <kbd>n</kbd>none <kbd>u</kbd>unclear <kbd>z</kbd>undo box <kbd>c</kbd>clear box <kbd>&larr;/&rarr;</kbd>prev/next <kbd>g</kbd>next-unlabeled</div>
 <script>
 const cv=document.getElementById('cv'),ctx=cv.getContext('2d'),num=document.getElementById('num');
-let i=0,total=0,img=new Image(),box=null,drag=null,sc=1,ox=0,oy=0,iw=0,ih=0;
+let i=0,total=0,img=new Image(),box=null,drag=null,sc=1,ox=0,oy=0,iw=0,ih=0,boxHist=[];
 function draw(){ctx.clearRect(0,0,cv.width,cv.height);ctx.drawImage(img,ox,oy,iw*sc,ih*sc);
  const b=drag||box; if(b){ctx.lineWidth=2;ctx.strokeStyle=drag?'#3af':'#3f6';ctx.setLineDash(drag?[5,3]:[]);
   ctx.strokeRect(ox+b.x1*iw*sc,oy+b.y1*ih*sc,(b.x2-b.x1)*iw*sc,(b.y2-b.y1)*ih*sc);ctx.setLineDash([]);}
@@ -46,10 +46,10 @@ function toImg(e){const r=cv.getBoundingClientRect();return [((e.clientX-r.left)
 cv.onmousedown=e=>{const[x,y]=toImg(e);drag={x1:x,y1:y,x2:x,y2:y};};
 cv.onmousemove=e=>{if(!drag)return;const[x,y]=toImg(e);drag.x2=x;drag.y2=y;draw();};
 cv.onmouseup=e=>{if(!drag)return;let{x1,y1,x2,y2}=drag;drag=null;
- if(Math.abs(x2-x1)>0.02&&Math.abs(y2-y1)>0.02)box={x1:Math.min(x1,x2),y1:Math.min(y1,y2),x2:Math.max(x1,x2),y2:Math.max(y1,y2)};draw();};
+ if(Math.abs(x2-x1)>0.02&&Math.abs(y2-y1)>0.02){boxHist.push(box);box={x1:Math.min(x1,x2),y1:Math.min(y1,y2),x2:Math.max(x1,x2),y2:Math.max(y1,y2)};}draw();};
 async function load(j){const d=await(await fetch('/api/item/'+j)).json();i=d.idx;total=d.total;
  document.getElementById('pos').textContent=(i+1)+'/'+total;document.getElementById('done').textContent=d.done+' labeled';
- const b=d.label&&d.label.box; box=b?{x1:b[0],y1:b[1],x2:b[2],y2:b[3]}:null;
+ const b=d.label&&d.label.box; box=b?{x1:b[0],y1:b[1],x2:b[2],y2:b[3]}:null; boxHist=[];
  num.value=(d.label&&d.label.number&&!['none','unclear'].includes(d.label.number))?d.label.number:'';
  img=new Image();img.onload=()=>{const MH=620;sc=Math.min(MH/img.height,2.5);iw=img.width;ih=img.height;
   cv.width=iw*sc;cv.height=ih*sc;ox=0;oy=0;draw();num.focus();};img.src='/crop/'+i+'?t='+Date.now();}
@@ -60,10 +60,11 @@ async function save(v){v=String(v).trim();
 document.addEventListener('keydown',e=>{const a=document.activeElement===num;
  if(e.key==='Enter'){save(num.value);e.preventDefault();}
  else if(e.key==='n'&&!a)save('none');else if(e.key==='u'&&!a)save('unclear');
- else if(e.key==='c'&&!a){box=null;draw();}
+ else if(e.key==='c'&&!a){boxHist.push(box);box=null;draw();}
+ else if(e.key==='z'&&!a){if(boxHist.length){box=boxHist.pop();draw();}}
  else if(e.key==='ArrowRight'){if(i<total-1)load(i+1);}else if(e.key==='ArrowLeft'){if(i>0)load(i-1);}
  else if(e.key==='g'&&!a)fetch('/api/next_unlabeled?after='+i).then(r=>r.json()).then(d=>{if(d.idx>=0)load(d.idx);});});
-load(0);
+fetch('/api/next_unlabeled?after=-1').then(r=>r.json()).then(d=>load(d.idx>=0?d.idx:0));  // resume where we left off
 </script></body></html>"""
 
 app = FastAPI(title="jersey-number annotator")
