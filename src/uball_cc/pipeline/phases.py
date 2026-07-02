@@ -12,6 +12,8 @@ from pathlib import Path
 
 import numpy as np
 
+from uball_cc.fusion.engine import TUNED
+
 from .jobs import Job, JobStore
 from .vlm import narrate
 
@@ -20,6 +22,7 @@ DEFAULT_WEIGHTS = str(REPO / "runs" / "rfdetr-s-1280-ourdata-v1" / "best.pth")
 DEFAULT_CALIB_DIR = REPO / "configs" / "calib"
 ZONE = {"FL": 0.6, "FR": 0.6, "NL": 1.0, "NR": 1.0}
 TEAM_CAMS = {"NL", "NR"}    # only NEAR cams vote on team (far-cam crops too small to separate teams)
+JERSEY_CAMS = TEAM_CAMS     # same rule for jersey numbers: far fisheye reads are unreliable (audit)
 
 
 # ---------------- detect ----------------
@@ -82,9 +85,18 @@ def run_track(job: Job, store: JobStore, *, min_consecutive_frames: int = 3,
 
 # ---------------- fuse (cross-camera -> world-state) ----------------
 def run_fuse(job: Job, store: JobStore, *, calib_dir: Path = DEFAULT_CALIB_DIR,
-             ref_angle: str | None = None, max_assoc_dist: float = 600.0, gate_cost: float = 7.0,
-             w_t: float = 1.0, w_a: float = 3.0, min_hits: int = 4, cluster_dist: float = 600.0,
-             region_pad: float = 250.0, audio_sync: bool = True) -> dict:
+             ref_angle: str | None = None, max_assoc_dist: float = TUNED["max_assoc_dist"],
+             gate_cost: float = TUNED["gate_cost"], w_t: float = TUNED["w_t"],
+             w_a: float = TUNED["w_a"], min_hits: int = TUNED["min_hits"],
+             cluster_dist: float = TUNED["cluster_dist"], region_pad: float = 250.0,
+             audio_sync: bool = True, ball: str = "none") -> dict:
+    """Fuse per-camera tracks into the world-state (+ events).
+
+    ball: "none" (default) derives events WITHOUT a ball — possession/pass are skipped with
+    an honest caveat. "motion" opts into the EXPERIMENTAL motion-fusion ball tracker, which
+    the 2026-07-02 audit showed follows players rather than the ball (median 77cm from the
+    nearest player); do not trust its possession events until the trained motion-aware
+    detector replaces it."""
     from uball_cc.fusion.audiosync import audio_offset_seconds
     from uball_cc.fusion.court import LENGTH, WIDTH
     from uball_cc.fusion.engine import FusionEngine, Observation
@@ -124,8 +136,10 @@ def run_fuse(job: Job, store: JobStore, *, calib_dir: Path = DEFAULT_CALIB_DIR,
         for ang, sh in aligned.items():
             for t, xy in sh.get(f, []):
                 team = t.team if ang in TEAM_CAMS else None   # only near cams vote on team
-                obs.append(Observation(ang, t.track_id, xy, team=team, jersey=t.jersey,
-                                       reid=reid_maps[ang].get(t.track_id), zone_conf=ZONE.get(ang, 1.0)))
+                jersey = t.jersey if ang in JERSEY_CAMS else None
+                obs.append(Observation(ang, t.track_id, xy, team=team, jersey=jersey,
+                                       reid=reid_maps[ang].get(t.track_id),
+                                       score=t.score, zone_conf=ZONE.get(ang, 1.0)))
         live = eng.step(f, obs)
         frames_out.append({"frame": f, "tracks": [{"global_id": t.id,
                           "court_xy": [round(float(v), 1) for v in t.pos], "team": t.team,
@@ -143,23 +157,25 @@ def run_fuse(job: Job, store: JobStore, *, calib_dir: Path = DEFAULT_CALIB_DIR,
                for gid, r in roster.items()]
     ws = {"n_global_ids": len(players), "players": players, "frames": frames_out,
           "ref_angle": ref, "angles": job.angles}
-    # --- motion-fusion ball (full-court, docs/08) -> world-state + event stream ---
-    from uball_cc.fusion.ball_fuse import multicam_ball_trace
+    # --- ball -> world-state + event stream (docs/08; ball="none" degrades honestly) ---
     from uball_cc.fusion.events import derive_events
-    clips = {ang: str(store.video(job, ang)) for ang in job.angles}
-    ball = multicam_ball_trace(clips, str(calib_dir), ref=ref, audio_sync=audio_sync, zone=ZONE)
-    ball_xy = {int(f): v for f, v in ball.items()}
+    ball_xy: dict[int, tuple] = {}
+    if ball == "motion":                     # EXPERIMENTAL (see docstring / audit 2026-07-02)
+        from uball_cc.fusion.ball_fuse import multicam_ball_trace
+        clips = {ang: str(store.video(job, ang)) for ang in job.angles}
+        trace = multicam_ball_trace(clips, str(calib_dir), ref=ref, audio_sync=audio_sync, zone=ZONE)
+        ball_xy = {int(f): tuple(v) for f, v in trace.items()}
     for fr in frames_out:
         fr["ball"] = ball_xy.get(fr["frame"])
-    ws["ball"] = {str(f): v for f, v in ball.items()}
-    events = derive_events(ws, ball_by_frame={f: tuple(v) for f, v in ball_xy.items()}, fps=fps)
+    ws["ball"] = {str(f): list(v) for f, v in ball_xy.items()}
+    events = derive_events(ws, ball_by_frame=ball_xy or None, fps=fps)
     ws["events"] = events
     out = job.dir / "fuse"
     out.mkdir(parents=True, exist_ok=True)
     (out / "worldstate.json").write_text(json.dumps(ws))
     return {"n_global_ids": len(players), "n_frames": len(frames_out),
             "avg_players_per_frame": round(np.mean([len(f["tracks"]) for f in frames_out]), 1) if frames_out else 0,
-            "ball_frames": len(ball), "n_events": events["summary"]["n_events"],
+            "ball_frames": len(ball_xy), "ball_source": ball, "n_events": events["summary"]["n_events"],
             "n_passes": events["summary"]["n_passes"], "n_turnovers": events["summary"]["n_turnovers"]}
 
 

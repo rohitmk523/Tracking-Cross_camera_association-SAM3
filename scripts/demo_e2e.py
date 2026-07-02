@@ -33,6 +33,9 @@ def main() -> int:
     ap.add_argument("--no-vlm", action="store_true", help="skip the Gemini narration stage")
     ap.add_argument("--no-audio-sync", action="store_true",
                     help="EXPLICITLY fuse unsynced (audit 2026-07-02: FR is ~-13 frames; never skip silently)")
+    ap.add_argument("--ball", choices=("none", "motion"), default="none",
+                    help="'motion' = EXPERIMENTAL motion-fusion ball (audit: follows players, "
+                         "not the ball); default derives events honestly without a ball")
     a = ap.parse_args()
 
     os.chdir(REPO)
@@ -52,15 +55,21 @@ def main() -> int:
     print(f"[1] PLAYERS (cross-camera fusion): {ws['n_global_ids']} global IDs | teams {dict(teams)}", flush=True)
 
     clips = {ang: a.clips_glob.format(ang=ang) for ang in ("FL", "FR", "NL", "NR")}
-    ball = multicam_ball_trace(clips, a.calib, ref=a.ref, audio_sync=not a.no_audio_sync,
-                               zone={"FL": 0.6, "FR": 0.6, "NL": 1.0, "NR": 1.0})
-    ball_xy = {int(k): v for k, v in ball.items()}
+    ball_xy: dict[int, tuple] = {}
+    if a.ball == "motion":
+        trace = multicam_ball_trace(clips, a.calib, ref=a.ref, audio_sync=not a.no_audio_sync,
+                                    zone={"FL": 0.6, "FR": 0.6, "NL": 1.0, "NR": 1.0})
+        ball_xy = {int(k): tuple(v) for k, v in trace.items()}
+        print(f"[2] BALL (motion fusion, EXPERIMENTAL): {len(ball_xy)} frames "
+              "(audit: follows players — don't trust possession)", flush=True)
+    else:
+        print("[2] BALL: none (honest default; pass --ball motion for the experimental tracker)",
+              flush=True)
     for fr in ws["frames"]:
         fr["ball"] = ball_xy.get(fr["frame"])
-    ws["ball"] = {str(k): v for k, v in ball.items()}
-    print(f"[2] BALL (4-cam motion fusion): tracked in {len(ball)} frames", flush=True)
+    ws["ball"] = {str(k): list(v) for k, v in ball_xy.items()}
 
-    events = derive_events(ws, ball_by_frame={f: tuple(v) for f, v in ball_xy.items()})
+    events = derive_events(ws, ball_by_frame=ball_xy or None)
     ws["events"] = events
     s = events["summary"]
     print(f"[3] EVENTS: {s['n_events']} total | {s['n_passes']} passes | {s['n_turnovers']} turnovers", flush=True)

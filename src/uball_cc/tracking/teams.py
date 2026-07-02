@@ -102,6 +102,17 @@ def _torso_hue(crops: list[np.ndarray]) -> float | None:
     return float(np.median(hues)) if hues else None
 
 
+def majority_class(tracks: list[Track]) -> dict[int, int]:
+    """Per-track MAJORITY detector class. ByteTrack matches by IoU only, so a player track
+    can carry scattered referee-class frames (and vice versa); labelling per OBSERVATION
+    made one NR track flip A<->REF 42 times and leaked REF votes into the fusion team
+    counters (2026-07-02 audit). The track's majority class decides ALL its frames."""
+    votes: dict[int, Counter] = {}
+    for t in tracks:
+        votes.setdefault(t.track_id, Counter())[t.class_id] += 1
+    return {tid: c.most_common(1)[0][0] for tid, c in votes.items()}
+
+
 def assign_teams(video_path: str | Path, tracks: list[Track], *,
                  sample_per_track: int = 6, embedder: SiglipEmbedder | None = None,
                  seed: int = 0, method: str = "color") -> tuple[list[Track], dict]:
@@ -126,7 +137,8 @@ def assign_teams(video_path: str | Path, tracks: list[Track], *,
                 track_feat[tid] = emb.mean(axis=0)
 
     ids = list(track_feat.keys())
-    player_ids = {t.track_id for t in tracks if t.class_id == 0}
+    maj = majority_class(tracks)
+    player_ids = {tid for tid, c in maj.items() if c == 0}
     team_of: dict[int, str | None] = {}
     info = {"player_tracks": len(player_ids), "clustered_tracks": len(ids), "method": method}
     if len(ids) >= 2:
@@ -154,9 +166,10 @@ def assign_teams(video_path: str | Path, tracks: list[Track], *,
 
     out = []
     for t in tracks:
-        if t.class_id == 1:
+        mc = maj.get(t.track_id, t.class_id)          # track majority, not this frame's class
+        if mc == 1:
             out.append(t.with_attrs(team="REF"))
-        elif t.class_id == 0:
+        elif mc == 0:
             out.append(t.with_attrs(team=team_of.get(t.track_id)))
         else:
             out.append(t)

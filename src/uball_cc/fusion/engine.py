@@ -21,6 +21,13 @@ from .kalman import CVKalman2D
 
 _LARGE = 1e6
 
+# The tuned 4-cam config (docs/06) — the SINGLE source of defaults for fuse_cams.py and
+# pipeline/phases.run_fuse (the audit found three divergent parameter sets; the CLI silently
+# reproduced the over-counting config). NOTE: tuned while NL/NR were unknowingly unsynced —
+# re-tune (esp. cluster_dist=600) now that sync is strict and the clips carry audio.
+TUNED = {"max_assoc_dist": 600.0, "gate_cost": 7.0, "w_t": 1.0, "w_a": 3.0,
+         "min_hits": 4, "cluster_dist": 600.0}
+
 
 @dataclass
 class Observation:
@@ -44,8 +51,9 @@ class GlobalTrack:
     id: int
     dt: float = 1 / 30.0
     jersey_min_votes: int = 3
-    kf: CVKalman2D = field(init=False)
-    members: dict[str, int] = field(default_factory=dict)
+    attr_decay: float = 0.98         # per-update decay of team/jersey votes: recent evidence
+    kf: CVKalman2D = field(init=False)  # dominates, so early contamination (REF flicker, an ID
+    members: dict[str, int] = field(default_factory=dict)  # switch) fades instead of persisting
     hits: int = 0
     time_since_update: int = 0
     last_frame: int = -1
@@ -91,6 +99,11 @@ class GlobalTrack:
         self._ingest(obs_list, frame)
 
     def _ingest(self, obs_list: list[Observation], frame: int, init: bool = False) -> None:
+        for c in (self._team, self._jersey):
+            for k in list(c):
+                c[k] *= self.attr_decay
+                if c[k] < 0.01:
+                    del c[k]
         for o in obs_list:
             if o.team:
                 self._team[o.team] += 1
@@ -114,12 +127,14 @@ class FusionEngine:
                  w_t: float = 4.0, w_j: float = 8.0, max_assoc_dist: float = 250.0,
                  gate_cost: float = 6.0, lost_buffer: int = 45, reentry_frames: int = 150,
                  reentry_dist: float = 350.0, merge_dist: float = 120.0, cluster_dist: float = 250.0,
-                 min_hits: int = 3, jersey_min_votes: int = 3):
+                 min_hits: int = 3, jersey_min_votes: int = 3, attr_decay: float = 0.98,
+                 reentry_min_score: float = 0.55):
         self.dt, self.w_d, self.w_a, self.w_t, self.w_j = dt, w_d, w_a, w_t, w_j
         self.max_assoc_dist, self.gate_cost = max_assoc_dist, gate_cost
         self.lost_buffer, self.reentry_frames = lost_buffer, reentry_frames
         self.reentry_dist, self.merge_dist, self.cluster_dist = reentry_dist, merge_dist, cluster_dist
         self.min_hits, self.jersey_min_votes = min_hits, jersey_min_votes
+        self.attr_decay, self.reentry_min_score = attr_decay, reentry_min_score
         self.tracks: list[GlobalTrack] = []
         self.lost: list[GlobalTrack] = []
         self._next_id = 1
@@ -167,8 +182,8 @@ class FusionEngine:
         # 3. leftover groups -> re-entry or a new global track
         for i in leftover:
             if self._try_reentry(groups[i], frame) is None:
-                t = GlobalTrack(self._next_id, dt=self.dt,
-                                jersey_min_votes=self.jersey_min_votes).init(groups[i], frame)
+                t = GlobalTrack(self._next_id, dt=self.dt, jersey_min_votes=self.jersey_min_votes,
+                                attr_decay=self.attr_decay).init(groups[i], frame)
                 self._next_id += 1
                 self.tracks.append(t)
 
@@ -212,6 +227,8 @@ class FusionEngine:
         cen = np.mean([o.court_xy for o in cl], axis=0)
         jers = Counter(o.jersey for o in cl if o.jersey is not None)
         cj = jers.most_common(1)[0][0] if jers else None
+        teams = Counter(o.team for o in cl if o.team)
+        ct = teams.most_common(1)[0][0] if teams else None
         reid = next((o.reid for o in cl if o.reid is not None), None)
         best, best_score = None, -1.0
         for lt in self.lost:
@@ -219,7 +236,9 @@ class FusionEngine:
                 continue
             if cj is not None and lt.jersey is not None and cj != lt.jersey:
                 continue                                    # jersey rules it out
-            if float(np.linalg.norm(cen - lt.pos)) > self.reentry_dist:
+            if ct and lt.team and ct != lt.team:
+                continue                                    # team rules it out (audit: reid alone
+            if float(np.linalg.norm(cen - lt.pos)) > self.reentry_dist:  # can't — camera-biased)
                 continue
             score = 0.0
             if cj is not None and lt.jersey == cj:
@@ -228,7 +247,10 @@ class FusionEngine:
                 score += _cos(reid, lt.reid)
             if score > best_score:
                 best, best_score = lt, score
-        if best is not None and best_score > 0.3:
+        # threshold: measured cross-cam same-rig reid cosine NEVER drops below 0.456, so the
+        # old 0.3 gate could not reject anyone (identity theft on subs). 0.55 still accepts
+        # true returns (same-person mean 0.69) and lets jersey (+1.0) override weak reid.
+        if best is not None and best_score > self.reentry_min_score:
             self.lost.remove(best)
             self.tracks.append(best)
             best.update(cl, frame)
@@ -246,22 +268,24 @@ class FusionEngine:
         self.lost = [t for t in self.lost if frame - t.last_frame <= self.reentry_frames]
 
     def _enforce_unique(self) -> None:
-        """At most one live track per committed (team, number)."""
+        """At most one live track per committed (team, number). The weaker claimant KEEPS
+        LIVING but its number votes are cleared (retraction) — the old behaviour silently
+        DELETED the track, so one confidently-wrong jersey read could destroy a real
+        identity (audit blast-radius finding). team=None tracks are exempt: (None, n)
+        keys collide across teams and prove nothing."""
         best: dict[tuple, GlobalTrack] = {}
-        drop: list[GlobalTrack] = []
         for t in self.tracks:
-            if t.jersey is None:
+            if t.jersey is None or t.team is None:
                 continue
             key = (t.team, t.jersey)
             cur = best.get(key)
-            if cur is None or t.hits > cur.hits:
-                if cur is not None:
-                    drop.append(cur)
+            if cur is None:
+                best[key] = t
+            elif t.hits > cur.hits:
+                cur._jersey.clear()
                 best[key] = t
             else:
-                drop.append(t)
-        if drop:
-            self.tracks = [t for t in self.tracks if t not in drop]
+                t._jersey.clear()
 
 
 def fuse_sequence(frames: list[list[Observation]], **kw) -> list[list[dict]]:

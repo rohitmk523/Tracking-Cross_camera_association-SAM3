@@ -18,9 +18,14 @@ class CVKalman2D:
         self.P = np.diag([r * r, r * r, p0 * p0, p0 * p0]).astype(float)
         self.F = np.array([[1, 0, dt, 0], [0, 1, 0, dt], [0, 0, 1, 0], [0, 0, 0, 1]], float)
         self.H = np.array([[1, 0, 0, 0], [0, 1, 0, 0]], float)
-        # process noise (acceleration q cm/s^2 driving velocity, integrated to position)
-        g = np.array([[0.5 * dt * dt], [0.5 * dt * dt], [dt], [dt]])
-        self.Q = (g @ g.T) * (q * q)
+        # process noise: INDEPENDENT white acceleration per axis (block-diagonal CV form).
+        # The old rank-1 g@g.T modelled ONE scalar acceleration driving x and y identically,
+        # coupling the axes with spurious cross-covariance (2026-07-02 audit).
+        qb = np.array([[dt ** 4 / 4, dt ** 3 / 2], [dt ** 3 / 2, dt ** 2]]) * (q * q)
+        self.Q = np.zeros((4, 4))
+        for p, v in ((0, 2), (1, 3)):                     # (px,vx) block, (py,vy) block
+            self.Q[p, p], self.Q[p, v] = qb[0, 0], qb[0, 1]
+            self.Q[v, p], self.Q[v, v] = qb[1, 0], qb[1, 1]
         self.r = r
 
     def predict(self) -> None:

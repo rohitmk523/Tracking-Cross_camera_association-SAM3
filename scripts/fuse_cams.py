@@ -51,6 +51,8 @@ def _load_cam(tracks_json, calib_json, region_pad=250.0):
 
 
 def main() -> int:
+    from uball_cc.fusion.engine import TUNED   # single source of tuned defaults (audit: the CLI
+                                               # defaults had silently diverged from phases.py)
     ap = argparse.ArgumentParser()
     ap.add_argument("--cam", nargs=4, action="append", metavar=("ANGLE", "TRACKS", "CALIB", "CLIP"),
                     required=True)
@@ -59,13 +61,13 @@ def main() -> int:
     ap.add_argument("--save-worldstate", default=None, help="write the fused world-state JSON here")
     ap.add_argument("--out-fps", type=float, default=30.0)
     ap.add_argument("--no-audio-sync", action="store_true")
-    ap.add_argument("--max-assoc-dist", type=float, default=200.0)
-    ap.add_argument("--gate-cost", type=float, default=6.0)
-    ap.add_argument("--w-t", type=float, default=4.0, help="team-disagree penalty (lower if per-cam teams noisy)")
-    ap.add_argument("--min-hits", type=int, default=3)
-    ap.add_argument("--w-a", type=float, default=1.5, help="ReID weight in association cost")
+    ap.add_argument("--max-assoc-dist", type=float, default=TUNED["max_assoc_dist"])
+    ap.add_argument("--gate-cost", type=float, default=TUNED["gate_cost"])
+    ap.add_argument("--w-t", type=float, default=TUNED["w_t"], help="team-disagree penalty (lower if per-cam teams noisy)")
+    ap.add_argument("--min-hits", type=int, default=TUNED["min_hits"])
+    ap.add_argument("--w-a", type=float, default=TUNED["w_a"], help="ReID weight in association cost")
     ap.add_argument("--w-d", type=float, default=1.0, help="court-distance weight")
-    ap.add_argument("--cluster-dist", type=float, default=250.0, help="cross-camera grouping tolerance (cm)")
+    ap.add_argument("--cluster-dist", type=float, default=TUNED["cluster_dist"], help="cross-camera grouping tolerance (cm)")
     ap.add_argument("--region-pad", type=float, default=250.0,
                     help="cm tolerance outside a camera's calibrated hull before its obs are dropped")
     a = ap.parse_args()
@@ -82,6 +84,7 @@ def main() -> int:
     # near cams own the court (accurate); far cams downweighted (far-field error)
     zone = {"FL": 0.6, "FR": 0.6, "NL": 1.0, "NR": 1.0}
     TEAM_CAMS = {"NL", "NR"}    # only NEAR cams vote on team; far-cam crops are too small to separate
+    JERSEY_CAMS = TEAM_CAMS     # same rule for numbers: far fisheye reads are unreliable (audit)
     # project + sync each camera onto the ref frame timeline
     aligned: dict[str, dict[int, list]] = {}
     reid_maps: dict[str, dict] = {}
@@ -111,8 +114,10 @@ def main() -> int:
             zc = zone.get(ang, 1.0)
             for t, xy in sh.get(f, []):
                 team = t.team if ang in TEAM_CAMS else None
-                obs.append(Observation(ang, t.track_id, xy, team=team, jersey=t.jersey,
-                                       reid=reid_maps[ang].get(t.track_id), zone_conf=zc))
+                jersey = t.jersey if ang in JERSEY_CAMS else None
+                obs.append(Observation(ang, t.track_id, xy, team=team, jersey=jersey,
+                                       reid=reid_maps[ang].get(t.track_id),
+                                       score=t.score, zone_conf=zc))
                 raw.append((xy, t.team))
         live = eng.step(f, obs)
         per_frame_live[f] = [(t.id, tuple(t.pos), t.team, t.jersey) for t in live]

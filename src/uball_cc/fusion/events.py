@@ -18,9 +18,14 @@ from .court import CENTER, LENGTH
 
 # --- tunables (court cm / seconds) ---
 POSS_RADIUS_CM = 180.0          # a player within this of the ball is a possession candidate
-MIN_POSS_FRAMES = 8             # frames a player must hold nearest-to-ball to confirm possession
+MIN_POSS_FRAMES = 12            # frames a player must hold nearest-to-ball to confirm possession
+                                # (>0.37s: a 9 m/s pass crosses a bystander's 180cm radius in ~11
+                                # frames — 8 minted phantom possessions on pass-throughs, audit)
 STICKY_MARGIN_CM = 70.0         # holder KEEPS possession unless a challenger is this much closer (hysteresis)
 SWITCH_FRAMES = 6               # ...and stays clearly-closest this many consecutive frames -> kills jitter
+LOOSE_CONFIRM_FRAMES = 3        # frames of stability before a LOOSE ball is assigned a holder
+                                # (audit: instant loose-state takeover gave a rolling ball to any
+                                # defender it passed within one frame)
 PASS_MAX_GAP_FRAMES = 30        # max gap between two possessions to call it a pass (not a reset)
 FASTBREAK_CM = 800.0            # team-centroid x travel to flag a transition
 FASTBREAK_WINDOW_S = 2.0        # ...within this window
@@ -77,7 +82,8 @@ def _possession_runs(frames, by_frame, ball_by_frame):
         else:
             ch_count = ch_count + 1 if nearest == challenger else 1
             challenger = nearest
-            if holder is None or ch_count >= SWITCH_FRAMES:  # confirmed takeover
+            need = LOOSE_CONFIRM_FRAMES if holder is None else SWITCH_FRAMES
+            if ch_count >= need:                             # confirmed takeover (never instant)
                 holder, holder_team = nearest, by_frame[f][nearest]["team"]
                 challenger, ch_count = None, 0
         if holder is not None:                              # survives a 1-frame holder dropout
