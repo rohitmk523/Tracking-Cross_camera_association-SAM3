@@ -88,7 +88,7 @@ def run_fuse(job: Job, store: JobStore, *, calib_dir: Path = DEFAULT_CALIB_DIR,
              ref_angle: str | None = None, max_assoc_dist: float = TUNED["max_assoc_dist"],
              gate_cost: float = TUNED["gate_cost"], w_t: float = TUNED["w_t"],
              w_a: float = TUNED["w_a"], min_hits: int = TUNED["min_hits"],
-             cluster_dist: float = TUNED["cluster_dist"], region_pad: float = 250.0,
+             cluster_dist: float = TUNED["cluster_dist"], region_pad: float = 800.0,
              audio_sync: bool = True, ball: str = "none") -> dict:
     """Fuse per-camera tracks into the world-state (+ events).
 
@@ -100,8 +100,7 @@ def run_fuse(job: Job, store: JobStore, *, calib_dir: Path = DEFAULT_CALIB_DIR,
     from uball_cc.fusion.audiosync import audio_offset_seconds
     from uball_cc.fusion.court import LENGTH, WIDTH
     from uball_cc.fusion.engine import FusionEngine, Observation
-    from uball_cc.fusion.homography import (calib_hull, homography_from_calib, in_calib_region,
-                                            load_calib, project)
+    from uball_cc.fusion.homography import calib_hull, in_calib_region, load_calib, project_pixels
     from uball_cc.tracking import Track
 
     trk = job.dir / "track"
@@ -110,10 +109,9 @@ def run_fuse(job: Job, store: JobStore, *, calib_dir: Path = DEFAULT_CALIB_DIR,
     aligned, reid_maps = {}, {}
     for ang in job.angles:
         calib = load_calib(calib_dir / f"{ang}.json")
-        h = homography_from_calib(calib)
         hull = calib_hull(calib)                          # gate to the camera's calibrated region
         tracks = [Track.from_record(r) for r in json.loads((trk / f"{ang}.json").read_text())["tracks"]]
-        court = project([t.foot_xy for t in tracks], h) if tracks else np.zeros((0, 2))
+        court = project_pixels([t.foot_xy for t in tracks], calib) if tracks else np.zeros((0, 2))
         rp = trk / f"{ang}_reid.npz"
         reid_maps[ang] = ({int(i): v for i, v in zip(z["ids"], z["emb"])}
                           if rp.exists() and (z := np.load(rp)) is not None else {})

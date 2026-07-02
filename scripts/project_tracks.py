@@ -30,16 +30,17 @@ def main() -> int:
     import cv2
 
     from uball_cc.fusion.court import X0, X1, Y0, Y1, draw_court
-    from uball_cc.fusion.homography import homography_from_calib, load_calib, project, reprojection_error
+    from uball_cc.fusion.homography import (homography_from_calib, load_calib, project_pixels,
+                                            reprojection_error)
     from uball_cc.tracking import Track
 
     calib = load_calib(a.calib)
-    h = homography_from_calib(calib)
     if "correspondences" in calib:
-        print("reprojection error (cm):", reprojection_error(calib["correspondences"], h))
+        print("reprojection error (cm):",
+              reprojection_error(calib["correspondences"], homography_from_calib(calib)))
 
     tracks = [Track.from_record(r) for r in json.loads(Path(a.tracks).read_text())["tracks"]]
-    court = project([t.foot_xy for t in tracks], h)
+    court = project_pixels([t.foot_xy for t in tracks], calib)
     inb = ((court[:, 0] >= X0) & (court[:, 0] <= X1) & (court[:, 1] >= Y0) & (court[:, 1] <= Y1))
     print(f"projected {len(tracks)} observations; inside court: {inb.mean() * 100:.0f}%")
 

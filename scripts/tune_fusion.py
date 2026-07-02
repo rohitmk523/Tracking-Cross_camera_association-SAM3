@@ -38,8 +38,7 @@ def _load_obs(tracks_tpl: str, calib_dir: str, clip_tpl: str, ref: str, region_p
     from uball_cc.fusion.audiosync import audio_offset_seconds
     from uball_cc.fusion.court import LENGTH, WIDTH
     from uball_cc.fusion.engine import Observation
-    from uball_cc.fusion.homography import (calib_hull, homography_from_calib, in_calib_region,
-                                            load_calib, project)
+    from uball_cc.fusion.homography import calib_hull, in_calib_region, load_calib, project_pixels
     from uball_cc.tracking import Track
 
     by_frame: dict[int, list] = defaultdict(list)
@@ -47,8 +46,8 @@ def _load_obs(tracks_tpl: str, calib_dir: str, clip_tpl: str, ref: str, region_p
         data = json.loads(Path(tracks_tpl.format(ang=ang)).read_text())
         tracks = [Track.from_record(r) for r in data["tracks"]]
         calib = load_calib(f"{calib_dir}/{ang}.json")
-        h, hull = homography_from_calib(calib), calib_hull(calib)
-        court = project([t.foot_xy for t in tracks], h)
+        hull = calib_hull(calib)
+        court = project_pixels([t.foot_xy for t in tracks], calib)
         off = 0
         if ang != ref:
             off_s, _ = audio_offset_seconds(clip_tpl.format(ang=ref), clip_tpl.format(ang=ang))
@@ -99,7 +98,7 @@ def main() -> int:
     ap.add_argument("--clips", default="data/clips/e6fba750_{ang}_47_12.mp4")
     ap.add_argument("--calib", default="configs/calib")
     ap.add_argument("--ref", default="FL")
-    ap.add_argument("--region-pad", type=float, default=250.0)
+    ap.add_argument("--region-pad", type=float, default=800.0)
     ap.add_argument("--out", default="runs/tracking/fusion_tune.json")
     a = ap.parse_args()
 

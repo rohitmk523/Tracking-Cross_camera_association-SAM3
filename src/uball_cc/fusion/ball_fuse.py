@@ -72,7 +72,7 @@ def multicam_ball_trace(clips: dict[str, str], calib_dir: str, *, angles: list[s
     from .audiosync import audio_offset_seconds
     from .ball import reject_stationary, track_ball
     from .ball_motion import motion_candidates
-    from .homography import (calib_hull, homography_from_calib, in_calib_region, load_calib, project)
+    from .homography import calib_hull, in_calib_region, load_calib, project_pixels
 
     angles = angles or list(clips)
     zone = zone or {}
@@ -83,7 +83,7 @@ def multicam_ball_trace(clips: dict[str, str], calib_dir: str, *, angles: list[s
         if not cp or not Path(cp).exists():
             continue
         calib = load_calib(Path(calib_dir) / f"{ang}.json")
-        h, hull = homography_from_calib(calib), calib_hull(calib)
+        hull = calib_hull(calib)
         cand_img = motion_candidates(list(iter_video_frames(str(cp))))
         off_f = 0
         if audio_sync and ref_clip and ang != ref:
@@ -92,7 +92,7 @@ def multicam_ball_trace(clips: dict[str, str], calib_dir: str, *, angles: list[s
         zc = zone.get(ang, 1.0)
         court: dict[int, list[tuple]] = {}
         for fi, cands in cand_img.items():
-            for (cx, cy), (_x, _y, s) in zip(project([(x, y) for x, y, _ in cands], h), cands):
+            for (cx, cy), (_x, _y, s) in zip(project_pixels([(x, y) for x, y, _ in cands], calib), cands):
                 if in_calib_region((cx, cy), hull, region_pad):
                     court.setdefault(fi - off_f, []).append((float(cx), float(cy), float(s) * zc))
         per_cam[ang] = court

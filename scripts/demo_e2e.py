@@ -24,7 +24,7 @@ sys.path.insert(0, str(REPO / "src"))
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--worldstate", default="runs/tracking/e6_worldstate.json")
+    ap.add_argument("--worldstate", default="runs/tracking/e6_worldstate_v4.json")
     ap.add_argument("--clips-glob", default="data/clips/e6fba750_{ang}_47_12.mp4",
                     help="clip path template with {ang} for FL/FR/NL/NR")
     ap.add_argument("--calib", default="configs/calib")

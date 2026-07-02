@@ -72,3 +72,26 @@ def homography_from_calib(d: dict) -> np.ndarray:
     if "homography_matrix" in d:
         return np.array(d["homography_matrix"], dtype=np.float64)
     return compute_homography(d["correspondences"])
+
+
+def undistort_points(points_xy, d: dict) -> np.ndarray:
+    """Division-model lens correction (fisheye rig): p' = c + (p-c)/(1 + lambda*r^2),
+    r = |p-c|/diag. No-op for calibs without `division_lambda` (back-compat). The rig's
+    pinhole-only homographies couldn't fit all calibration points at once — see
+    scripts/refit_calibration.py for the per-camera fit."""
+    pts = np.array(points_xy, dtype=np.float64).reshape(-1, 2)
+    lam = d.get("division_lambda")
+    if not lam:
+        return pts
+    w, h = d.get("image_size", [1920, 1080])
+    cx, cy = d.get("principal_point") or (w / 2.0, h / 2.0)
+    diag = float(np.hypot(cx, cy))
+    q = pts - [cx, cy]
+    r2 = (q ** 2).sum(1) / diag ** 2
+    return q / (1 + lam * r2)[:, None] + [cx, cy]
+
+
+def project_pixels(points_xy, d: dict) -> np.ndarray:
+    """Pixel -> court (cm) through the FULL calib: undistort, then homography.
+    Use this (not raw `project`) wherever camera pixels become court positions."""
+    return project(undistort_points(points_xy, d), homography_from_calib(d))

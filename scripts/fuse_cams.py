@@ -24,17 +24,15 @@ PAD = 300.0                                   # cm tolerance outside court for k
 TEAM_COLOR = {"A": (0, 140, 255), "B": (255, 120, 40), "REF": (0, 255, 255), None: (160, 160, 160)}
 
 
-def _load_cam(tracks_json, calib_json, region_pad=250.0):
+def _load_cam(tracks_json, calib_json, region_pad=800.0):
     from uball_cc.fusion.court import LENGTH, WIDTH
-    from uball_cc.fusion.homography import (calib_hull, homography_from_calib, in_calib_region,
-                                            load_calib, project)
+    from uball_cc.fusion.homography import calib_hull, in_calib_region, load_calib, project_pixels
     from uball_cc.tracking import Track
 
     tracks = [Track.from_record(r) for r in json.loads(Path(tracks_json).read_text())["tracks"]]
     calib = load_calib(calib_json)
-    h = homography_from_calib(calib)
     hull = calib_hull(calib)                          # camera's calibrated region (None -> accept all)
-    court = project([t.foot_xy for t in tracks], h)
+    court = project_pixels([t.foot_xy for t in tracks], calib)   # undistort + homography
     per_frame: dict[int, list] = collections.defaultdict(list)
     kept = 0
     for t, c in zip(tracks, court):
@@ -68,7 +66,7 @@ def main() -> int:
     ap.add_argument("--w-a", type=float, default=TUNED["w_a"], help="ReID weight in association cost")
     ap.add_argument("--w-d", type=float, default=1.0, help="court-distance weight")
     ap.add_argument("--cluster-dist", type=float, default=TUNED["cluster_dist"], help="cross-camera grouping tolerance (cm)")
-    ap.add_argument("--region-pad", type=float, default=250.0,
+    ap.add_argument("--region-pad", type=float, default=800.0,
                     help="cm tolerance outside a camera's calibrated hull before its obs are dropped")
     a = ap.parse_args()
     engine_kw = dict(max_assoc_dist=max(a.max_assoc_dist, a.cluster_dist), gate_cost=a.gate_cost,
