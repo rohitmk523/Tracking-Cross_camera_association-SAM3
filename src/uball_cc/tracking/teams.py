@@ -157,10 +157,21 @@ def assign_teams(video_path: str | Path, tracks: list[Track], *,
             hs = [_torso_hue(crops_by_id.get(ids[i], [])) for i in range(len(ids)) if labels[i] == cl]
             hs = [h for h in hs if h is not None]
             cl_hue[cl] = float(np.median(hs)) if hs else 999.0
-        a_cluster = min(cl_hue, key=cl_hue.get)
+        info["cluster_hue"] = cl_hue
+        if method == "color" and abs(cl_hue[0] - cl_hue[1]) < 8.0:
+            # ACHROMATIC kits (black vs white): both hue anchors collapse onto the floor hue,
+            # making the A/B mapping a per-camera coin flip (cameras then DISAGREE and their
+            # fused team votes cancel — seen on c2a354fe). Brightness orders the same way on
+            # every camera: darker kit -> A.
+            cl_v = {cl: float(np.median(x[labels == cl, 1])) for cl in (0, 1)}
+            a_cluster = min(cl_v, key=cl_v.get)
+            info["anchor"] = "brightness"
+            info["cluster_v"] = cl_v
+        else:
+            a_cluster = min(cl_hue, key=cl_hue.get)
+            info["anchor"] = "hue"
         team_of = {tid: ("A" if labels[i] == a_cluster else "B") for i, tid in enumerate(ids)}
         info["team_counts"] = dict(Counter(team_of.values()))
-        info["cluster_hue"] = cl_hue
     else:
         team_of = {tid: None for tid in ids}              # too few to cluster
 
