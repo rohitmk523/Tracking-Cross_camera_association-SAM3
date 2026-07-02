@@ -1,102 +1,85 @@
 # Cross-Camera Basketball Analysis — Progress
 
-_Last updated: 2026-06-29_
+_Last updated: 2026-07-02 (post-audit)_
 
 ## What the system does
 Turns **four fixed-camera videos of a game** into **descriptive, timestamped play-by-play** —
 automatically. It figures out *who* is on court (team + jersey), *where* everyone is, and *what
-happened* (shots, passes, possessions), and writes it up like a commentator. It runs on the
-existing 4-camera rig (far-left, far-right, near-left, near-right).
+happened* (possessions, passes), and writes it up like a commentator. It runs on the existing
+4-camera rig (far-left, far-right, near-left, near-right).
 
-The pipeline has five stages. Here's where each stands:
+## 2026-07-02: full adversarial audit
+Before scaling up, we ran a deep audit of every subsystem — re-measuring all claims from the
+saved run artifacts and checking our methods against current published research (SoccerNet
+challenges, CVPR sports workshops, production ball-tracking systems). Several claims below were
+**corrected** as a result. That is the point of an audit: we now know precisely what works, what
+doesn't, and what to build next — before spending more annotation and GPU budget.
 
-| Stage | What it does | Status |
+| Stage | What it does | Audited status |
 |---|---|---|
-| **1. Detect** | Find every player, referee, ball in each camera, every frame | ✅ Working (players strong); ball + ref being strengthened |
-| **2. Track** | Follow each person over time + label team + appearance signature | ✅ Working |
-| **3. Fuse** | Merge all 4 cameras into one top-down map, one identity per player | ✅ Working (core IP) |
-| **4. Events** | Deterministic "what happened" — possession, passes, shots | 🔶 Built; unblocking now (ball detection) |
-| **5. Narrate** | AI commentator writes the play-by-play from the verified state | ✅ Working |
+| **1. Detect** | Find every player, referee, ball in each camera, every frame | ✅ Working, **measured** (player 0.91 / referee 0.90 / ball 0.80 near-basket, held-out games) |
+| **2. Track** | Follow each person over time + team + appearance signature | ✅ Working with known caveats (player↔referee flicker; ID fragmentation) |
+| **3. Fuse** | Merge 4 cameras into one top-down map, one identity per player | 🔶 Core works (12 stable IDs on the test window); precision limits found + being fixed |
+| **4. Events** | Deterministic "what happened" — possession, passes | 🔶 Logic sound; **blocked on real ball tracking** (see below) |
+| **5. Narrate** | AI commentator writes play-by-play from the verified state | ✅ Working; grounding video (boxes+IDs burned in) built |
 
-## Stage detail
+## What the audit confirmed as solid
+- **Detection** is the one subsystem with real measured accuracy on held-out games — the
+  event-anchored data pipeline (game DB → shot frames → annotate → retrain) works and is the
+  template for everything else.
+- **Per-camera tracking** (ByteTrack) is standard practice, correctly implemented; 25/25 tests pass.
+- **The fusion architecture** (project all cameras to one court plane → match → track) is the
+  established pattern in the literature, and the calibration-region gate was a genuine fix
+  (over-count 16.3 → ~13 players/frame).
+- **12 on-court players get one stable global identity** ≥50% of the clip on the e6 window (real,
+  re-verified). Transient ghost identities remain (30 total IDs for ~13 people).
+- **Camera sync is now verified, not assumed**: FR runs **−13 frames** vs FL; NL/NR are <1 frame
+  off. Sync failures now stop the pipeline loudly instead of silently fusing unaligned cameras.
 
-**1 — Detection.** Our own detector (trained only on our footage) reliably finds **players**
-(≈88–93% accuracy on unseen games). **Ball** and **referee** detection are the weak spots — the
-ball is tiny/fast, refs vary game to game. This is the active improvement area (below).
+## What the audit corrected
 
-**2 — Tracking.** Each player is followed across time and tagged with their **team** (by jersey
-color) and a unique **appearance signature** for re-identification. Working reliably.
+**Ball tracking (the big one).** The earlier "full-court ball tracking works" claim did not
+survive measurement. The motion+agreement tracker follows **players** (their moving limbs
+generate most motion candidates, and multiple cameras "agree" on players just as well as on the
+ball): the produced trace sits a median 77 cm from the nearest player, covers ~24% of the court
+(not full-court), and the "740 cm travel" figure traced to a different, discarded artifact.
+- **Why it's still progress:** motion *is* the right cue for a ball this small (confirmed by the
+  literature — TrackNet/WASB), and the per-camera motion + sync + fusion machinery is built and
+  tested. What's missing is a **trained** ball scorer on top of the motion signal instead of
+  hand-tuned color/size rules, and 3D-aware cross-camera geometry (a flying ball violates the
+  flat-court assumption).
+- **Short-term honest path:** near-basket ball detection (AP 0.80, already trained) + possession
+  from player trajectories; **medium-term:** train the motion-aware ball detector (the same
+  annotate→train flywheel that fixed detection).
 
-**3 — Cross-camera fusion (the hard, differentiating part).** All four camera views are projected
-onto one **top-down court map** and merged so each player gets **one consistent identity** across
-all cameras. We cut the over-counting from ~16 to ~13.5 tracked players per frame (real count ≈12)
-by fixing how each camera's calibrated region is used. This is the piece most comparable systems
-stop short of.
+**Events.** The possession/pass/turnover engine is logically sound and degrades honestly without
+a ball — but fed the flawed ball trace it over-fired (11 possession changes in 12 s). It will be
+re-validated once the ball input is real, against a small hand-labeled ground-truth set.
 
-**4 — The "what happened" layer (current focus).** The engine that turns positions into
-**possession / pass / turnover** events is **built and tested** — but it depends on reliably
-tracking the **ball**, and the ball is too small for the current detector to localize. **This is
-the one real blocker**, and it's exactly what we're resolving right now.
+**Team labels.** Correct on near cameras (verified); far cameras cannot separate these teams by
+color and are rightly excluded from voting. Robustness across arenas/lighting needs a stronger
+method eventually (tracked in backlog).
 
-**5 — Narration.** A vision-language model (Google Gemini) watches the video, grounded on the
-verified identities, and produces **rich, timestamped play-by-play naming real players**. Working
-today; it gets more accurate once fed the events layer.
-
-## What we built to unblock Stage 4 (the momentum story)
-The ball detector needs more training examples of a **big, clearly-visible ball**. We built a data
-pipeline that:
-1. Reads the **event database** (every recorded shot, with timestamp and which basket),
-2. Automatically pulls the **near-camera frames at each shot** — where the ball is largest and clearest,
-3. Pre-labels them and stages them for correction.
-
-This produced **1,152 training frames across all 25 games** — **73% carry a ball box** (vs ~5%
-before). ~500 were annotated and we **retrained the detector on AWS GPU**.
-
-## Retrain outcome (held-out games)
-- **Ball: AP 0.80**, **referee: 0.90** (a previously-collapsing class, was ~0.04), player **0.91**.
-- Near-basket play: the ball is detected well; **possession events are now clean** (sustained
-  1–6s holds, sensible passes) on half-court sets.
-
-## Full-court ball tracking — built and working
-The honest blocker turned out to be that **mid-court the ball is too small to detect by
-appearance — even a human can't reliably spot it in a single frame.** The answer is
-**motion-based** detection: the ball is small but moves fast against a near-static court, so its
-*motion* reveals it where its appearance can't. We built and validated the full pipeline:
-1. **Per-camera motion detection** (3-frame differencing) — finds the moving ball mid-court.
-2. **Cross-camera fusion by agreement** — the real ball appears at one court point in ≥2 cameras;
-   a per-camera false positive appears in only one. Agreement both locates and confirms the ball.
-3. **Audio-sync + Kalman track** — on a real fast break, the 4-camera fusion tracks the ball in a
-   **smooth curve up the full court** (single camera managed a fraction of that), and the
-   audio-sync validated itself against the rig's known camera offset.
-
-It's **wired into the pipeline**: the fuse stage now writes the ball into the world-state and
-derives **possession / pass / turnover** events, which the VLM narrates over.
-
-## Cross-camera fusion — core working, two identity-quality gaps
-- **Players:** the 12 on-court players each get **one stable global identity** tracked across all
-  4 cameras through the whole clip. The hard part (one-ID-per-player across views) works; a mild
-  over-count of transient IDs remains (far-camera calibration residual).
-- **Ball:** full-court tracking (above) — fused into the same world-state.
-- **Gap 1 — team A/B labels.** Verified against the video: the two teams are **roughly even**
-  (cyan vs dark jerseys), but SigLIP+KMeans mis-clustered the dark team (it blends into shadows).
-  **Fixed:** switched team clustering to a torso **jersey-colour feature** (`[S, V, S·cosH, S·sinH]`)
-  which separates bright-vs-dark cleanly, paired with **near-camera-only voting** (far cameras
-  provably can't separate teams, so they're excluded). e6 core split **9/3 → 5/7** (≈ even, matches
-  the video), and events read correctly (Green/Blue passes + turnovers).
-- **Gap (open) — jersey numbers.** Not yet read. Decision: **defer, then train a model — not OCR.**
-  General OCR fails on tiny/fisheye/blurred numbers; a number-localizer + a trained recognizer on
-  annotated cross-game number crops (near/large crops, with voting) is the robust path — the same
-  data-driven recipe as the ball. This is the main remaining identity-quality item.
+**Jersey numbers (identity).** Direction confirmed — but the plan was upgraded to match what
+wins SoccerNet's jersey-recognition challenge: a **scene-text-recognition model (PARSeq)
+fine-tuned on our crops** (reads *any* number, including ones never seen in training) gated by a
+**legibility classifier**, instead of a fixed-list classifier that can only output numbers it was
+trained on. Every annotation made so far feeds the new plan (nothing wasted), and three data
+fixes landed before further annotation: the labeling queue now interleaves **all 25 games**
+(was: one game), the train/val split is leak-proof (same play can't appear on both sides), and
+the "unclear" labels now train the legibility gate instead of being discarded.
 
 ## Where we are
-- **Working:** detection, tracking, cross-camera fusion (stable player IDs + **correct team labels**
-  + full-court ball), the deterministic event stream (possession/pass/turnover), and narration —
-  end to end.
-- **Next, in order:** (1) **jersey numbers** (trained recognizer, near/large crops + voting),
-  (2) trim the mild fusion over-count, (3) broaden validation across more games/clips.
-  _(Shot make/miss is out of scope here — that logic lives in the separate shot-detection repo.)_
+- **Working end-to-end:** detection → tracking → cross-camera player fusion → grounded narration,
+  with verified camera sync and honest per-stage caveats.
+- **In flight:** jersey numbers (PARSeq zero-shot baseline running on the first 91 crops — it
+  decides how much annotation is needed), annotation continuing across all 25 games.
+- **Next, in order:** (1) jersey recognizer (STR fine-tune + legibility gate + tracklet voting),
+  (2) trained motion-aware ball detector, (3) a small hand-labeled ground-truth set (ball
+  positions + possession/pass labels on 2–3 windows) so every future claim is measured, not
+  eyeballed, (4) fusion hardening (per-track class votes, fisheye undistortion, re-entry gate).
+  _(Shot make/miss stays out of scope — separate repo.)_
 
-**One-line summary:** all five stages work end to end — four-camera video in; **identified
-players on correct teams + a full-court ball + a structured "what happened" event stream
-(possession/pass/turnover) + descriptive play-by-play** out. Remaining identity polish: jersey
-numbers (trained), and a mild fusion over-count.
+**One-line summary:** players, teams and cross-camera identity work and are now precisely
+characterized; narration is grounded; the ball is the one honest blocker, with a
+literature-backed plan (trained motion-aware detection) and the data flywheel to execute it.
