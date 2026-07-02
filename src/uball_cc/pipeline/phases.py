@@ -135,7 +135,9 @@ def run_fuse(job: Job, store: JobStore, *, calib_dir: Path = DEFAULT_CALIB_DIR,
         obs = []
         for ang, sh in aligned.items():
             for t, xy in sh.get(f, []):
-                team = t.team if ang in TEAM_CAMS else None   # only near cams vote on team
+                # A/B needs colour separation -> near cams only. REF is a DETECTOR-class
+                # fact (majority-voted per track), trustworthy from any camera.
+                team = t.team if (ang in TEAM_CAMS or t.team == "REF") else None
                 jersey = t.jersey if ang in JERSEY_CAMS else None
                 obs.append(Observation(ang, t.track_id, xy, team=team, jersey=jersey,
                                        reid=reid_maps[ang].get(t.track_id),

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Assign A/B teams to player tracklets (SigLIP + KMeans) and render a team-colored video.
+"""Assign A/B teams to player tracklets and render a team-colored video.
 
   python scripts/assign_teams.py --video data/clips/e6fba750_FL_47_12.mp4 \
       --tracks runs/tracking/e6fba750_FL_47_12.json \
       --out runs/tracking/e6fba750_FL_47_12_teams.json \
       --save-video runs/tracking/e6fba750_FL_47_12_teams.mp4
 
-Players -> A/B (clustered by appearance), referees -> REF. Reuses the tracklets from
-scripts/track.py; the SigLIP model downloads once on first run.
-"""
+Players -> A/B via the torso-colour feature (method=color, default; SigLIP kept as the
+--method siglip fallback for same-coloured teams and only loaded then). Referees -> REF
+by the track's MAJORITY class (per-frame class flicker no longer leaks REF labels)."""
 from __future__ import annotations
 
 import argparse
@@ -22,6 +22,7 @@ def main() -> int:
     ap.add_argument("--video", required=True)
     ap.add_argument("--tracks", required=True, help="tracklets JSON from scripts/track.py")
     ap.add_argument("--sample-per-track", type=int, default=6)
+    ap.add_argument("--method", default="color", choices=("color", "siglip"))
     ap.add_argument("--model", default="google/siglip-base-patch16-224")
     ap.add_argument("--save-video", default=None)
     ap.add_argument("--out-fps", type=float, default=30.0)
@@ -36,9 +37,10 @@ def main() -> int:
     data = json.loads(Path(a.tracks).read_text())
     tracks = [Track.from_record(r) for r in data["tracks"]]
 
-    embedder = SiglipEmbedder(a.model)
+    # SigLIP loads ONLY when its method is chosen (audit D13: it was loaded and never used)
+    embedder = SiglipEmbedder(a.model) if a.method == "siglip" else None
     tracks, info = assign_teams(a.video, tracks, sample_per_track=a.sample_per_track,
-                                embedder=embedder)
+                                embedder=embedder, method=a.method)
     print("team assignment:", info)
 
     out = Path(a.out) if a.out else Path(a.tracks).with_name(Path(a.tracks).stem + "_teams.json")
