@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
 from pathlib import Path
 
 import uvicorn
@@ -55,7 +57,8 @@ async function load(j){const d=await(await fetch('/api/item/'+j)).json();i=d.idx
   cv.width=iw*sc;cv.height=ih*sc;ox=0;oy=0;draw();num.focus();};img.src='/crop/'+i+'?t='+Date.now();}
 async function save(v){v=String(v).trim();
  const payload={number:v,box:(box&&!['none','unclear'].includes(v))?[box.x1,box.y1,box.x2,box.y2]:null};
- await fetch('/api/save/'+i,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+ const r=await fetch('/api/save/'+i,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+ if(!r.ok){const e=await r.json().catch(()=>({}));alert(e.error||'save rejected');return;}
  if(i<total-1)load(i+1);else load(i);}
 document.addEventListener('keydown',e=>{const a=document.activeElement===num;
  if(e.key==='Enter'){save(num.value);e.preventDefault();}
@@ -100,11 +103,31 @@ def item(i: int):
     return {"idx": i, "total": len(items), "done": len(labels), "label": labels.get(items[i]["crop"])}
 
 
+def _write_labels(labels: dict) -> None:
+    """Atomic replace + rolling backup — labels.json is the SOLE (gitignored) copy of
+    operator hours; a crash mid-write must never truncate it (2026-07-02 audit)."""
+    p, tmp = POOL / "labels.json", POOL / "labels.json.tmp"
+    tmp.write_text(json.dumps(labels))
+    os.replace(tmp, p)
+    if len(labels) % 20 == 0:
+        shutil.copy(p, POOL / "labels.bak.json")
+
+
 @app.post("/api/save/{i}")
 async def save(i: int, body: dict):
+    num, box = str(body.get("number", "")).strip(), body.get("box")
+    if num in ("none", "unclear"):
+        box = None
+    elif num.isdigit() and len(num) <= 2:
+        if not (isinstance(box, list) and len(box) == 4):
+            return JSONResponse({"error": "numeric label needs a number box — draw one first"},
+                                status_code=422)
+    else:
+        return JSONResponse({"error": f"invalid label {num!r} — digits 0-99, or none/unclear"},
+                            status_code=422)
     items, labels = _items(), _labels()
-    labels[items[i]["crop"]] = {"number": body.get("number", ""), "box": body.get("box")}
-    (POOL / "labels.json").write_text(json.dumps(labels))
+    labels[items[i]["crop"]] = {"number": num, "box": box}
+    _write_labels(labels)
     return JSONResponse({"done": len(labels)})
 
 
