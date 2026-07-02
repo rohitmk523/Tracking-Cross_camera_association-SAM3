@@ -159,6 +159,10 @@ def run_fuse(job: Job, store: JobStore, *, calib_dir: Path = DEFAULT_CALIB_DIR,
                for gid, r in roster.items()]
     ws = {"n_global_ids": len(players), "players": players, "frames": frames_out,
           "ref_angle": ref, "angles": job.angles}
+    # tracklet post-pass: fold gap-fragments into their canonical identity (docs/06 follow-up)
+    from uball_cc.fusion.tracklets import apply_merges, merge_map
+    ws = apply_merges(ws, merge_map(frames_out))
+    frames_out = ws["frames"]
     # --- ball -> world-state + event stream (docs/08; ball="none" degrades honestly) ---
     from uball_cc.fusion.events import derive_events
     ball_xy: dict[int, tuple] = {}
@@ -175,7 +179,7 @@ def run_fuse(job: Job, store: JobStore, *, calib_dir: Path = DEFAULT_CALIB_DIR,
     out = job.dir / "fuse"
     out.mkdir(parents=True, exist_ok=True)
     (out / "worldstate.json").write_text(json.dumps(ws))
-    return {"n_global_ids": len(players), "n_frames": len(frames_out),
+    return {"n_global_ids": ws["n_global_ids"], "n_frames": len(frames_out),
             "avg_players_per_frame": round(np.mean([len(f["tracks"]) for f in frames_out]), 1) if frames_out else 0,
             "ball_frames": len(ball_xy), "ball_source": ball, "n_events": events["summary"]["n_events"],
             "n_passes": events["summary"]["n_passes"], "n_turnovers": events["summary"]["n_turnovers"]}

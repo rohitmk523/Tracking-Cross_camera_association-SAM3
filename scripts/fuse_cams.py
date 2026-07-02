@@ -152,6 +152,11 @@ def main() -> int:
                    for gid, r in roster.items()]
         ws = {"n_global_ids": len(players), "players": players, "frames": frames_out,
               "ref_angle": a.ref, "angles": list(cams), "fps": FPS}
+        from uball_cc.fusion.tracklets import apply_merges, merge_map
+        mm = merge_map(frames_out)
+        ws = apply_merges(ws, mm)
+        if mm:
+            print(f"tracklet pass folded {len(mm)} fragment ids -> {ws['n_global_ids']} total")
         Path(a.save_worldstate).parent.mkdir(parents=True, exist_ok=True)
         Path(a.save_worldstate).write_text(json.dumps(ws))
         print(f"worldstate -> {a.save_worldstate}")
