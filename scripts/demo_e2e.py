@@ -31,6 +31,8 @@ def main() -> int:
     ap.add_argument("--ref", default="FL")
     ap.add_argument("--tag", default="e6")
     ap.add_argument("--no-vlm", action="store_true", help="skip the Gemini narration stage")
+    ap.add_argument("--no-audio-sync", action="store_true",
+                    help="EXPLICITLY fuse unsynced (audit 2026-07-02: FR is ~-13 frames; never skip silently)")
     a = ap.parse_args()
 
     os.chdir(REPO)
@@ -50,7 +52,7 @@ def main() -> int:
     print(f"[1] PLAYERS (cross-camera fusion): {ws['n_global_ids']} global IDs | teams {dict(teams)}", flush=True)
 
     clips = {ang: a.clips_glob.format(ang=ang) for ang in ("FL", "FR", "NL", "NR")}
-    ball = multicam_ball_trace(clips, a.calib, ref=a.ref, audio_sync=False,
+    ball = multicam_ball_trace(clips, a.calib, ref=a.ref, audio_sync=not a.no_audio_sync,
                                zone={"FL": 0.6, "FR": 0.6, "NL": 1.0, "NR": 1.0})
     ball_xy = {int(k): v for k, v in ball.items()}
     for fr in ws["frames"]:
