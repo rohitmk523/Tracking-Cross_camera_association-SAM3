@@ -120,7 +120,7 @@ def main() -> int:
                                        score=t.score, zone_conf=zc))
                 raw.append((xy, t.team))
         live = eng.step(f, obs)
-        per_frame_live[f] = [(t.id, tuple(t.pos), t.team, t.jersey) for t in live]
+        per_frame_live[f] = [(t.id, tuple(t.pos), t.team, t.jersey, dict(t.members)) for t in live]
         raw_by_frame[f] = raw
 
     n_ids = len({gid for v in per_frame_live.values() for gid, *_ in v})
@@ -133,9 +133,10 @@ def main() -> int:
         frames_out = []
         for f in frames:
             tr = []
-            for gid, xy, team, jersey in per_frame_live[f]:
+            for gid, xy, team, jersey, members in per_frame_live[f]:
                 tr.append({"global_id": gid, "court_xy": [round(float(xy[0]), 1), round(float(xy[1]), 1)],
-                           "team": team, "jersey": jersey})
+                           "team": team, "jersey": jersey,
+                           "members": members})   # {cam: local_track_id} — the cross-camera match
                 r = roster[gid]
                 if team:
                     r["team"][team] += 1
@@ -170,7 +171,7 @@ def main() -> int:
         img = base.copy()
         for xy, team in raw_by_frame.get(f, []):                       # faint raw per-cam obs
             cv2.circle(img, to_px(xy), 3, (90, 90, 90), -1)
-        for gid, xy, team, _jersey in per_frame_live.get(f, []):       # fused global tracks
+        for gid, xy, team, _jersey, _members in per_frame_live.get(f, []):   # fused global tracks
             col = TEAM_COLOR.get(team, (160, 160, 160))
             cv2.circle(img, to_px(xy), 8, col, -1)
             cv2.circle(img, to_px(xy), 8, (0, 0, 0), 1)
