@@ -84,12 +84,35 @@ def compare_cam(ours_by_f: dict, sam3_by_f: dict, iou_thr: float) -> dict:
             "worst_frames": [f for _, f in worst[:8]]}
 
 
+def _court_filter(boxes_by_f: dict, calib: dict, margin: float, box_key: str):
+    """Keep only boxes whose FOOT point projects inside the court (+margin cm) —
+    removes bench/spectator detections so both systems are scored on the same scope."""
+    import sys
+    sys.path.insert(0, str(REPO / "src"))
+    from uball_cc.fusion.court import LENGTH, WIDTH
+    from uball_cc.fusion.homography import project_pixels
+
+    out = {}
+    for f, rows in boxes_by_f.items():
+        if not rows:
+            out[f] = rows
+            continue
+        feet = [((r[box_key][0] + r[box_key][2]) / 2.0, r[box_key][3]) for r in rows]
+        court = project_pixels(feet, calib)
+        out[f] = [r for r, c in zip(rows, court)
+                  if -margin <= c[0] <= LENGTH + margin and -margin <= c[1] <= WIDTH + margin]
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--gid", default="e6fba750")
     ap.add_argument("--tag", default="47_12")
     ap.add_argument("--sam3-dir", default="runs/sam3_ref")
     ap.add_argument("--iou", type=float, default=0.5)
+    ap.add_argument("--court-filter", action="store_true",
+                    help="score only boxes whose foot projects onto the court (+margin)")
+    ap.add_argument("--margin", type=float, default=200.0)
     a = ap.parse_args()
 
     report = {}
@@ -103,7 +126,12 @@ def main() -> int:
         for t in json.loads(ours_p.read_text())["tracks"]:
             by_f[t["frame"]].append(t)
         sam3 = json.loads(sam3_p.read_text())
-        report[ang] = compare_cam(by_f, sam3["frames"], a.iou)
+        sam3_frames = sam3["frames"]
+        if a.court_filter:
+            calib = json.loads((REPO / f"configs/calib/{ang}.json").read_text())
+            by_f = _court_filter(by_f, calib, a.margin, "box_xyxy")
+            sam3_frames = _court_filter(sam3_frames, calib, a.margin, "box")
+        report[ang] = compare_cam(by_f, sam3_frames, a.iou)
         report[ang]["sam3_mode"] = sam3.get("mode")
         r = report[ang]
         print(f"{ang} [{r['sam3_mode']}]: agreement {r['agreement_rate']:.0%} | "
