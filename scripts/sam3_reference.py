@@ -34,27 +34,73 @@ def read_frames(path: str):
     return frames
 
 
+def _mask_to_box(mask) -> list | None:
+    import numpy as np
+    m = np.asarray(mask)
+    if m.ndim > 2:
+        m = m.squeeze()
+    ys, xs = np.where(m > 0.5)
+    if not len(xs):
+        return None
+    return [float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max())]
+
+
+def _rows_from(o) -> list:
+    """Tolerant extraction: boxes if present, else masks -> boxes."""
+    import torch
+    ids = o.get("object_ids", o.get("obj_ids", []))
+    ids = ids.tolist() if hasattr(ids, "tolist") else list(ids)
+    scores = o.get("scores", [1.0] * len(ids))
+    scores = scores.tolist() if hasattr(scores, "tolist") else list(scores)
+    boxes = o.get("boxes")
+    rows = []
+    if boxes is not None and len(boxes):
+        boxes = boxes.tolist() if hasattr(boxes, "tolist") else boxes
+        for k, box in enumerate(boxes):
+            rows.append({"box": [round(float(v), 1) for v in box],
+                         "id": int(ids[k]) if k < len(ids) else None,
+                         "score": round(float(scores[k]), 3) if k < len(scores) else 1.0})
+        return rows
+    masks = o.get("masks", o.get("pred_masks"))
+    if masks is None:
+        return rows
+    if isinstance(masks, torch.Tensor):
+        masks = masks.float().cpu().numpy()
+    for k in range(len(masks)):
+        box = _mask_to_box(masks[k])
+        if box:
+            rows.append({"box": [round(v, 1) for v in box],
+                         "id": int(ids[k]) if k < len(ids) else None,
+                         "score": round(float(scores[k]), 3) if k < len(scores) else 1.0})
+    return rows
+
+
 def try_video_track(frames, prompt: str, device: str):
-    """SAM3 video: text-prompted concept tracking -> per-frame boxes + stable object ids."""
+    """SAM3 video: TEXT-prompted concept tracking (Sam3Video*) -> boxes + stable object ids."""
     import torch
     import transformers
     names = [n for n in dir(transformers) if "sam3" in n.lower()]
     print(f"[probe] transformers {transformers.__version__} SAM3 symbols: {names}", flush=True)
-    from transformers import Sam3TrackerVideoModel, Sam3TrackerVideoProcessor  # may not exist
+    from transformers import Sam3VideoModel, Sam3VideoProcessor
 
-    model = Sam3TrackerVideoModel.from_pretrained("facebook/sam3", torch_dtype=torch.bfloat16).to(device)
-    processor = Sam3TrackerVideoProcessor.from_pretrained("facebook/sam3")
-    session = processor.init_video_session(video=frames, inference_device=device)
-    processor.add_text_prompt(session, text=prompt)
+    model = Sam3VideoModel.from_pretrained("facebook/sam3", torch_dtype=torch.bfloat16).to(device)
+    processor = Sam3VideoProcessor.from_pretrained("facebook/sam3")
+    session = processor.init_video_session(video=frames, inference_device=device,
+                                           video_storage_device="cpu",
+                                           dtype=torch.bfloat16)
+    if hasattr(processor, "add_text_prompt"):
+        processor.add_text_prompt(session, text=prompt)
+    else:
+        session.add_text_prompt(prompt)
+    propagate = getattr(model, "propagate_in_video_iterator",
+                        getattr(model, "propagate_in_video", None))
     out: dict[int, list] = {}
-    for res in model.propagate_in_video_iterator(session):
-        o = processor.postprocess_outputs(session, res)
-        f = int(o["frame_idx"])
-        rows = []
-        for oid, box, score in zip(o["object_ids"], o["boxes"], o.get("scores", [1.0] * len(o["boxes"]))):
-            rows.append({"box": [round(float(v), 1) for v in box], "id": int(oid),
-                         "score": round(float(score), 3)})
-        out[f] = rows
+    for res in propagate(session):
+        o = processor.postprocess_outputs(session, res) if hasattr(processor, "postprocess_outputs") else res
+        f = int(o.get("frame_idx", o.get("frame_index", len(out))))
+        out[f] = _rows_from(o)
+        if f % 50 == 0:
+            print(f"[video-track] frame {f}/{len(frames)} -> {len(out[f])}", flush=True)
     return "video-track", out
 
 
