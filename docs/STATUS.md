@@ -16,7 +16,43 @@ happened* (possessions, passes), and writes it up like a commentator. It runs on
 | **4. Events** | Deterministic "what happened" — possession, passes | 🔶 Engine ready; waiting on real ball tracking + a ground-truth check |
 | **5. Narrate** | AI commentator writes play-by-play from the verified state | ✅ Working; grounding video (boxes + IDs burned in) built |
 
-## This week: audit → fix → re-validate
+## Week in review — Mon Jun 29 → Fri Jul 3 (44 commits)
+
+**Monday.** Published the first stage-by-stage status document; the freshly retrained
+detector (ball 0.80, referee recovered to 0.90 on held-out games) became the pipeline default.
+
+**Tuesday.** Annotation-tool friction fixes (nested boxes, ball-on-player duplicates); built
+the event-anchored ball training set; first event-quality fixes (possession hysteresis,
+stationary-false-positive filter).
+
+**Wednesday.** Built motion-based ball detection + 4-camera motion fusion and wired it through
+to events and narration; fixed team A/B (jersey-colour classifier + near-camera-only voting);
+launched the jersey-number annotation round (crop extractor, labelling tool with tight
+number boxes, resume + undo); built the set-of-marks grounding video for the AI commentator.
+
+**Thursday — the audit.** Ran a full adversarial audit of every subsystem (re-measuring all
+claims from saved artifacts + checking methods against published research), then fixed what it
+found the same day: a silent camera-sync failure (now strict + measured: one camera ran 13
+frames off), the Wednesday ball claim retracted honestly (the tracker followed players, not
+the ball — now an explicit experimental flag), jersey data methodology corrected before more
+annotation (queue now covers all 25 games, leak-proof train/val split, tool hardening), engine
+hardening (identity over-count 28% of frames → under 7%), a ground-truth labelling tool so
+events become measurable, and the jersey training stack (modern scene-text recogniser: 78%
+zero-shot on our crops; fine-tune + legibility trainers smoke-tested, one command when labels land).
+
+**Friday.** Lens (fisheye) correction refit for all four cameras — the audit's biggest
+remaining error source — plus identity-fragment stitching: the benchmark window now yields
+**16 identities for 13 people, all 13 stable, 1 phantom, both referees**. Cold-validated the
+whole stack on a second, untouched game (matching quality; also caught + fixed a
+black-vs-white-kit team-naming bug). Eliminated the court-map flicker (234 dropout gaps → 5;
+players-per-frame now sits exactly at truth). Produced the client demo video (same player =
+same number in every camera). Ran **SAM3** — an independent state-of-the-art model — over both
+games on a cloud GPU as a cross-check: it confirms **91–99% of everything our pipeline
+detects** (our precision is clean) and quantified the known far-distance camera recall gap,
+which the 4-camera fusion design already compensates; its disagreement frames double as a
+free hard-example list for the next detector improvement round.
+
+## The audit in detail: audit → fix → re-validate
 We ran a **full adversarial audit** of every subsystem (re-measuring all claims from saved run
 artifacts, checking methods against current published research), then fixed what it found and
 **re-measured**. Highlights:
@@ -65,8 +101,8 @@ number instead of an eyeball check.
 - **Working and cross-game validated:** detection → tracking → 4-camera fusion (stable
   identities, correct teams, referees) → grounded narration, with verified sync and corrected
   lens geometry. 38 automated tests pass.
-- **In progress (operator):** jersey-number annotation across all games (~100 usable of a ~300–400
-  target) and the first ground-truth event labels.
+- **In progress (operator):** jersey-number annotation across all games (99 usable spanning 8
+  games so far, of a ~300–400 target) and the first ground-truth event labels (not started).
 - **Next, in order:** (1) fine-tune the jersey reader on the multi-game labels → named players
   end-to-end, (2) trained motion-aware ball detector → trustworthy possession/pass events,
   (3) score events against ground truth and tune the remaining occlusion under-count.
