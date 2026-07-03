@@ -68,9 +68,13 @@ def main() -> int:
     ap.add_argument("--cluster-dist", type=float, default=TUNED["cluster_dist"], help="cross-camera grouping tolerance (cm)")
     ap.add_argument("--region-pad", type=float, default=800.0,
                     help="cm tolerance outside a camera's calibrated hull before its obs are dropped")
+    ap.add_argument("--emit-coast", type=int, default=12,
+                    help="keep an identity on court up to N unseen frames (Kalman prediction, "
+                         "flagged 'coasting') — kills 1-5 frame detection blinks")
     a = ap.parse_args()
     engine_kw = dict(max_assoc_dist=max(a.max_assoc_dist, a.cluster_dist), gate_cost=a.gate_cost,
-                     w_t=a.w_t, w_a=a.w_a, w_d=a.w_d, min_hits=a.min_hits, cluster_dist=a.cluster_dist)
+                     w_t=a.w_t, w_a=a.w_a, w_d=a.w_d, min_hits=a.min_hits, cluster_dist=a.cluster_dist,
+                     emit_coast=a.emit_coast)
 
     from uball_cc.fusion.audiosync import audio_offset_seconds
     from uball_cc.fusion.court import draw_court
@@ -120,7 +124,8 @@ def main() -> int:
                                        score=t.score, zone_conf=zc))
                 raw.append((xy, t.team))
         live = eng.step(f, obs)
-        per_frame_live[f] = [(t.id, tuple(t.pos), t.team, t.jersey, dict(t.members)) for t in live]
+        per_frame_live[f] = [(t.id, tuple(t.pos), t.team, t.jersey, dict(t.members),
+                              t.time_since_update > 0) for t in live]
         raw_by_frame[f] = raw
 
     n_ids = len({gid for v in per_frame_live.values() for gid, *_ in v})
@@ -133,10 +138,11 @@ def main() -> int:
         frames_out = []
         for f in frames:
             tr = []
-            for gid, xy, team, jersey, members in per_frame_live[f]:
+            for gid, xy, team, jersey, members, coasting in per_frame_live[f]:
                 tr.append({"global_id": gid, "court_xy": [round(float(xy[0]), 1), round(float(xy[1]), 1)],
                            "team": team, "jersey": jersey,
-                           "members": members})   # {cam: local_track_id} — the cross-camera match
+                           "members": members,      # {cam: local_track_id} — the cross-camera match
+                           "coasting": coasting})   # True = Kalman prediction (briefly unseen)
                 r = roster[gid]
                 if team:
                     r["team"][team] += 1
@@ -171,7 +177,7 @@ def main() -> int:
         img = base.copy()
         for xy, team in raw_by_frame.get(f, []):                       # faint raw per-cam obs
             cv2.circle(img, to_px(xy), 3, (90, 90, 90), -1)
-        for gid, xy, team, _jersey, _members in per_frame_live.get(f, []):   # fused global tracks
+        for gid, xy, team, _jersey, _members, _coast in per_frame_live.get(f, []):   # fused global tracks
             col = TEAM_COLOR.get(team, (160, 160, 160))
             cv2.circle(img, to_px(xy), 8, col, -1)
             cv2.circle(img, to_px(xy), 8, (0, 0, 0), 1)

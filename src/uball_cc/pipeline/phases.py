@@ -89,7 +89,7 @@ def run_fuse(job: Job, store: JobStore, *, calib_dir: Path = DEFAULT_CALIB_DIR,
              gate_cost: float = TUNED["gate_cost"], w_t: float = TUNED["w_t"],
              w_a: float = TUNED["w_a"], min_hits: int = TUNED["min_hits"],
              cluster_dist: float = TUNED["cluster_dist"], region_pad: float = 800.0,
-             audio_sync: bool = True, ball: str = "none") -> dict:
+             audio_sync: bool = True, ball: str = "none", emit_coast: int = 12) -> dict:
     """Fuse per-camera tracks into the world-state (+ events).
 
     ball: "none" (default) derives events WITHOUT a ball — possession/pass are skipped with
@@ -127,7 +127,8 @@ def run_fuse(job: Job, store: JobStore, *, calib_dir: Path = DEFAULT_CALIB_DIR,
         aligned[ang] = per_frame
 
     eng = FusionEngine(max_assoc_dist=max_assoc_dist, gate_cost=gate_cost, w_t=w_t,
-                       w_a=w_a, min_hits=min_hits, cluster_dist=cluster_dist)
+                       w_a=w_a, min_hits=min_hits, cluster_dist=cluster_dist,
+                       emit_coast=emit_coast)
     frames_out, roster = [], defaultdict(lambda: {"team": Counter(), "jersey": Counter(), "xy": []})
     for f in sorted({fr for sh in aligned.values() for fr in sh}):
         obs = []
@@ -143,7 +144,8 @@ def run_fuse(job: Job, store: JobStore, *, calib_dir: Path = DEFAULT_CALIB_DIR,
         live = eng.step(f, obs)
         frames_out.append({"frame": f, "tracks": [{"global_id": t.id,
                           "court_xy": [round(float(v), 1) for v in t.pos], "team": t.team,
-                          "jersey": t.jersey} for t in live]})
+                          "jersey": t.jersey, "members": dict(t.members),
+                          "coasting": t.time_since_update > 0} for t in live]})
         for t in live:
             r = roster[t.id]
             if t.team:

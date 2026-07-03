@@ -128,13 +128,14 @@ class FusionEngine:
                  gate_cost: float = 6.0, lost_buffer: int = 45, reentry_frames: int = 150,
                  reentry_dist: float = 350.0, merge_dist: float = 120.0, cluster_dist: float = 250.0,
                  min_hits: int = 3, jersey_min_votes: int = 3, attr_decay: float = 0.98,
-                 reentry_min_score: float = 0.55):
+                 reentry_min_score: float = 0.55, emit_coast: int = 0):
         self.dt, self.w_d, self.w_a, self.w_t, self.w_j = dt, w_d, w_a, w_t, w_j
         self.max_assoc_dist, self.gate_cost = max_assoc_dist, gate_cost
         self.lost_buffer, self.reentry_frames = lost_buffer, reentry_frames
         self.reentry_dist, self.merge_dist, self.cluster_dist = reentry_dist, merge_dist, cluster_dist
         self.min_hits, self.jersey_min_votes = min_hits, jersey_min_votes
         self.attr_decay, self.reentry_min_score = attr_decay, reentry_min_score
+        self.emit_coast = emit_coast
         self.tracks: list[GlobalTrack] = []
         self.lost: list[GlobalTrack] = []
         self._next_id = 1
@@ -189,7 +190,12 @@ class FusionEngine:
 
         self._retire(frame)
         self._enforce_unique()
-        return [t for t in self.tracks if t.hits >= self.min_hits and t.time_since_update == 0]
+        # emit_coast > 0 also returns briefly-unseen tracks (Kalman prediction, up to
+        # emit_coast frames): 91% of measured dropout gaps were 1-5 frame detection
+        # blinks — coasting keeps the identity on court instead of flickering. Callers
+        # can flag them via t.time_since_update > 0.
+        return [t for t in self.tracks
+                if t.hits >= self.min_hits and t.time_since_update <= self.emit_coast]
 
     # --- cluster ALL observations (across cameras) into per-player groups ---
     def _cluster(self, observations: list[Observation]) -> list[list[Observation]]:
