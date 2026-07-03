@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Run the SAM3 reference pass on an AWS GPU (adapted from the proven aws_train.py scaffold):
-bundle sam3_reference.py + local clips -> S3 (presigned), launch a g5, install transformers,
-run SAM3 per clip, upload results tar + live log, self-terminate.
+stage the LOCAL sam3.pt (Ultralytics checkpoint, DEMO_UBALL/demo/sam3.pt) to S3 once,
+bundle sam3_reference.py + local clips, launch a g5, run SAM3 per clip via presigned URLs,
+upload results tar + live log, self-terminate. NO Hugging Face dependency — the .pt is
+everything (the HF gate only matters for downloading weights we already have).
 
   python scripts/aws_sam3_job.py --dry-run
   UBALL_AWS_CREDS_ROTATED=1 python scripts/aws_sam3_job.py         # launch
   python scripts/aws_sam3_job.py --fetch                           # results -> runs/sam3_ref/
 
 CREDENTIALS: boto3 default chain; rotation guard identical to aws_train.py (docs/11).
-The HF token (SAM3 weights are license-gated) is read from the local env/.env and passed
-to the instance via user-data — visible to this AWS account's console admins only.
 """
 from __future__ import annotations
 
@@ -29,23 +29,29 @@ DEFAULT_CLIPS = [f"data/clips/{gid}_{ang}_{tag}.mp4"
 PREFIX = "_tmp_sam3_ref"
 RESULTS_KEY = f"{PREFIX}/sam3_ref_results.tar.gz"
 LOG_KEY = f"{PREFIX}/sam3_ref.log"
+WEIGHTS_KEY = f"{PREFIX}/sam3.pt"
+WEIGHTS_LOCAL = Path("/Users/rohitkale/Cellstrat/GitHub_Repositories/DEMO_UBALL/demo/sam3.pt")
 
 
 def _aws_cfg() -> dict:
     return yaml.safe_load((REPO / "configs" / "train_rfdetr.yaml").read_text()).get("aws", {})
 
 
-def _hf_token() -> str:
+def _ensure_weights(s3, bucket: str) -> None:
+    """Stage sam3.pt to S3 once (3.45 GB multipart); skip if already there."""
     try:
-        from dotenv import load_dotenv
-        load_dotenv(REPO / ".env")
-    except ImportError:
+        head = s3.head_object(Bucket=bucket, Key=WEIGHTS_KEY)
+        print(f"sam3.pt already staged in s3 ({head['ContentLength'] / 1e9:.2f} GB)")
+        return
+    except Exception:
         pass
-    tok = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or ""
-    if not tok:
-        p = Path.home() / ".cache/huggingface/token"
-        tok = p.read_text().strip() if p.exists() else ""
-    return tok
+    if not WEIGHTS_LOCAL.exists():
+        sys.exit(f"sam3.pt not found at {WEIGHTS_LOCAL} and not staged in S3 — aborting.")
+    size = WEIGHTS_LOCAL.stat().st_size
+    print(f"uploading sam3.pt ({size / 1e9:.2f} GB) to s3://{bucket}/{WEIGHTS_KEY} "
+          "(one-time; multipart)...")
+    s3.upload_file(str(WEIGHTS_LOCAL), bucket, WEIGHTS_KEY)
+    print("sam3.pt staged.")
 
 
 def _guard_rotation(aws: dict, a) -> None:
@@ -76,11 +82,10 @@ def bundle(clips: list[str]) -> Path:
     return tmp
 
 
-def userdata(bundle_url: str, results_url: str, log_url: str, hf_token: str,
-             prompt: str) -> str:
+def userdata(bundle_url: str, weights_url: str, results_url: str, log_url: str) -> str:
     return f"""#!/bin/bash
 exec > /var/log/sam3.log 2>&1
-export HOME=/root PYTHONUNBUFFERED=1 HF_TOKEN={hf_token} HUGGING_FACE_HUB_TOKEN={hf_token}
+export HOME=/root PYTHONUNBUFFERED=1
 LOG_URL="{log_url}"
 (while true; do sleep 30; curl -s -T /var/log/sam3.log "$LOG_URL" >/dev/null 2>&1 || true; done) &
 PYBIN=""
@@ -89,16 +94,19 @@ for P in /opt/pytorch/bin/python /usr/bin/python3; do
 done
 [ -z "$PYBIN" ] && PYBIN=/usr/bin/python3
 $PYBIN -c "import torch;print('torch',torch.__version__,'cuda',torch.cuda.is_available())"
-$PYBIN -m pip install -q -U "transformers" "huggingface_hub" accelerate opencv-python-headless timm
-$PYBIN -c "import transformers;print('transformers',transformers.__version__)"
+$PYBIN -m pip install -q -U ultralytics opencv-python-headless
+$PYBIN -c "import ultralytics;print('ultralytics',ultralytics.__version__)"
 mkdir -p /work && cd /work
+echo "[boot] fetch bundle + sam3.pt"
 curl -s -L "{bundle_url}" -o b.tgz && tar xzf b.tgz
+curl -s -L "{weights_url}" -o sam3.pt
+ls -la sam3.pt
 mkdir -p out
 RC_ALL=0
 for C in clips/*.mp4; do
   B=$(basename "$C" .mp4)
   echo "=== SAM3 on $B ==="
-  $PYBIN sam3_reference.py --video "$C" --out "out/$B.sam3.json" --prompt "{prompt}" || RC_ALL=1
+  $PYBIN sam3_reference.py --video "$C" --out "out/$B.sam3.json" --weights /work/sam3.pt || RC_ALL=1
 done
 tar czf results.tar.gz -C out .
 CODE=$(curl -sS --max-time 1800 -w '%{{http_code}}' -o /dev/null -T results.tar.gz "{results_url}")
@@ -112,13 +120,10 @@ def launch(a) -> None:
     import boto3
     aws = _aws_cfg()
     _guard_rotation(aws, a)
-    tok = _hf_token()
-    if not tok:
-        sys.exit("no HF token found (env HF_TOKEN / ~/.cache/huggingface/token) — "
-                 "SAM3 weights are gated; aborting before spending AWS.")
     region, bucket = aws.get("region", "us-east-1"), aws.get("s3_bucket")
-    b = bundle(a.clips)
     s3 = boto3.client("s3", region_name=region)
+    _ensure_weights(s3, bucket)
+    b = bundle(a.clips)
     bundle_key = f"{PREFIX}/sam3_bundle.tar.gz"
     print(f"uploading bundle ({b.stat().st_size // 1_000_000} MB, {len(a.clips)} clips)...")
     s3.upload_file(str(b), bucket, bundle_key)
@@ -127,8 +132,8 @@ def launch(a) -> None:
         return s3.generate_presigned_url("get_object" if op == "get" else "put_object",
                                          Params={"Bucket": bucket, "Key": key}, ExpiresIn=exp)
 
-    ud = userdata(presign("get", bundle_key, 28800), presign("put", RESULTS_KEY, 86400),
-                  presign("put", LOG_KEY, 86400), tok, a.prompt)
+    ud = userdata(presign("get", bundle_key, 28800), presign("get", WEIGHTS_KEY, 28800),
+                  presign("put", RESULTS_KEY, 86400), presign("put", LOG_KEY, 86400))
     ec2 = boto3.client("ec2", region_name=region)
     r = ec2.run_instances(
         ImageId=aws.get("ami"), InstanceType=aws.get("instance_type", "g5.2xlarge"),
@@ -169,7 +174,6 @@ def log(a) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--clips", nargs="*", default=DEFAULT_CLIPS)
-    ap.add_argument("--prompt", default="person")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--fetch", action="store_true")
     ap.add_argument("--log", action="store_true")
@@ -179,10 +183,11 @@ def main() -> int:
     if a.dry_run:
         aws = _aws_cfg()
         b = bundle(a.clips)
+        w = (f"local {WEIGHTS_LOCAL.stat().st_size / 1e9:.2f} GB" if WEIGHTS_LOCAL.exists()
+             else "LOCAL COPY MISSING (ok if already staged in S3)")
         print(f"DRY RUN — bundle {b.stat().st_size // 1_000_000} MB ({len(a.clips)} clips), "
               f"instance {aws.get('instance_type')} in {aws.get('region')}, "
-              f"s3://{aws.get('s3_bucket')}/{PREFIX}/ | HF token: "
-              f"{'present' if _hf_token() else 'ABSENT (would abort)'}")
+              f"s3://{aws.get('s3_bucket')}/{PREFIX}/ | sam3.pt: {w}")
     elif a.fetch:
         fetch(a)
     elif a.log:
