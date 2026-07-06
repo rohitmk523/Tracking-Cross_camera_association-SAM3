@@ -15,6 +15,20 @@ AI commentator's play-by-play out. Runs on the existing 4-camera rig.
 
 ---
 
+## At a glance — last report vs. now
+
+| | Last report | **Now** |
+|---|---|---|
+| Jersey numbers | plan validated, 99 labels, no trained model | **3 models trained + wired: players NAMED end-to-end, 94% precision, verified on video** |
+| Player identity | 16 IDs / 13 people stable | holding — **plus court-map flicker eliminated** (234 dropout gaps → 5; players-per-frame now = truth) |
+| Event accuracy | unmeasurable (no ground truth) | **measured**: operator labeled 3 windows; old events scored 14% — the pass/fail bar now exists |
+| Ball | retracted claim, no replacement | **scored engineering program**: 3 approaches measured, dedicated BallNet built (35→38% held-out and climbing), auto-labeling teacher pipeline live, 4× data round training now |
+| Independent verification | SAM3 cross-check in flight | **landed: 91–99% of our detections confirmed** on both games |
+| Operator workload | jersey + ground-truth labeling pending | **zero — all targets met, every labeled set proved its value in a number** |
+| Demo assets | raw pipeline video | video with **same player = same number in every camera** + named rosters |
+
+---
+
 ## 1 · Named players — shipped end to end
 
 Every model trained on our own annotated footage and validated on **games it never saw in
