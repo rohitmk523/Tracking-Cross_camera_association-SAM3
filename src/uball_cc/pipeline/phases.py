@@ -53,7 +53,7 @@ def run_detect(job: Job, store: JobStore, *, weights: str = DEFAULT_WEIGHTS, mod
 
 # ---------------- track (+ team + reid) ----------------
 def run_track(job: Job, store: JobStore, *, min_consecutive_frames: int = 3,
-              team: bool = True, reid: bool = True) -> dict:
+              team: bool = True, reid: bool = True, jersey: bool = True) -> dict:
     from uball_cc.detection.base import Detection
     from uball_cc.tracking import ByteTrackTracker, Track, summarize
     from uball_cc.tracking.reid import OSNetEmbedder, default_reid_weights, track_embeddings
@@ -62,6 +62,10 @@ def run_track(job: Job, store: JobStore, *, min_consecutive_frames: int = 3,
     det_dir, out = job.dir / "detect", job.dir / "track"
     out.mkdir(parents=True, exist_ok=True)
     osnet = OSNetEmbedder(model_path=default_reid_weights()) if reid else None
+    jersey_stack = None
+    if jersey:
+        from uball_cc.tracking.jersey_stack import JerseyStack, read_track_jerseys
+        jersey_stack = JerseyStack()
     summary = {}
     for ang in job.angles:
         det = json.loads((det_dir / f"{ang}.json").read_text())
@@ -73,6 +77,10 @@ def run_track(job: Job, store: JobStore, *, min_consecutive_frames: int = 3,
         video = store.video(job, ang)
         if team and tracks:
             tracks, _ = assign_teams(video, tracks)          # method="color" (no SigLIP needed)
+        if jersey_stack and tracks and ang in JERSEY_CAMS:   # numbers are a NEAR-cam cue
+            numbers = read_track_jerseys(video, tracks, stack=jersey_stack)
+            tracks = [t.with_attrs(jersey=numbers[t.track_id]) if t.track_id in numbers
+                      else t for t in tracks]
         if reid and tracks:
             emb = track_embeddings(video, tracks, embedder=osnet)
             np.savez(out / f"{ang}_reid.npz", ids=np.array(list(emb)),
@@ -137,7 +145,7 @@ def run_fuse(job: Job, store: JobStore, *, calib_dir: Path = DEFAULT_CALIB_DIR,
                 # A/B needs colour separation -> near cams only. REF is a DETECTOR-class
                 # fact (majority-voted per track), trustworthy from any camera.
                 team = t.team if (ang in TEAM_CAMS or t.team == "REF") else None
-                jersey = t.jersey if ang in JERSEY_CAMS else None
+                jersey = t.jersey if (ang in JERSEY_CAMS and t.team != "REF") else None
                 obs.append(Observation(ang, t.track_id, xy, team=team, jersey=jersey,
                                        reid=reid_maps[ang].get(t.track_id),
                                        score=t.score, zone_conf=ZONE.get(ang, 1.0)))

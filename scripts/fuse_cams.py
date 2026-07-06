@@ -118,7 +118,7 @@ def main() -> int:
                 # A/B needs colour separation -> near cams only. REF is a DETECTOR-class
                 # fact (majority-voted per track), trustworthy from any camera.
                 team = t.team if (ang in TEAM_CAMS or t.team == "REF") else None
-                jersey = t.jersey if ang in JERSEY_CAMS else None
+                jersey = t.jersey if (ang in JERSEY_CAMS and t.team != "REF") else None
                 obs.append(Observation(ang, t.track_id, xy, team=team, jersey=jersey,
                                        reid=reid_maps[ang].get(t.track_id),
                                        score=t.score, zone_conf=zc))

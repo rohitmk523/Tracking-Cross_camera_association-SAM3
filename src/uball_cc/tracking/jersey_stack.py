@@ -88,3 +88,45 @@ class JerseyStack:
         if not num or len(num) > 2 or c < READ_MIN:
             return None, c
         return num, c
+
+
+MIN_VOTES = 2               # commit a track's number only on >=2 agreeing reads...
+MIN_SHARE = 0.6             # ...that are also >=60% of all successful reads for the track
+
+
+def vote_number(reads: list[str]) -> int | None:
+    """Commit a track's jersey number from its per-frame reads — or abstain. Requires
+    both absolute support (MIN_VOTES) and majority share (MIN_SHARE): one confident
+    wrong read must never name a player."""
+    from collections import Counter
+    if not reads:
+        return None
+    num, cnt = Counter(reads).most_common(1)[0]
+    if cnt >= MIN_VOTES and cnt / len(reads) >= MIN_SHARE:
+        return int(num)
+    return None
+
+
+def read_track_jerseys(video_path, tracks, *, stack: "JerseyStack | None" = None,
+                       sample_per_track: int = 12, min_box_h: int = 110) -> dict[int, int]:
+    """{track_id -> committed number} for PLAYER tracks in one camera's video.
+    Samples up to sample_per_track crops per track (attributes.per_track_crops), reads
+    each through the stack, commits via vote_number. Small far-cam boxes are skipped
+    (min_box_h) — numbers are a near-camera cue (docs/05)."""
+    from .attributes import per_track_crops
+    stack = stack or JerseyStack()
+    crops_by_id = per_track_crops(video_path, tracks, class_id=0,
+                                  sample_per_track=sample_per_track)
+    out: dict[int, int] = {}
+    for tid, crops in crops_by_id.items():
+        reads = []
+        for c in crops:
+            if c is None or c.shape[0] < min_box_h:
+                continue
+            num, _ = stack.read_crop(c)
+            if num is not None:
+                reads.append(num)
+        n = vote_number(reads)
+        if n is not None:
+            out[tid] = n
+    return out

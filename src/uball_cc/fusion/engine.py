@@ -78,8 +78,8 @@ class GlobalTrack:
 
     @property
     def jersey(self) -> int | None:
-        if not self._jersey:
-            return None
+        if not self._jersey or self.team == "REF":   # refs never carry a number: votes can
+            return None                              # leak in via mixed player/ref merges
         num, cnt = self._jersey.most_common(1)[0]
         return num if cnt >= self.jersey_min_votes else None
 
