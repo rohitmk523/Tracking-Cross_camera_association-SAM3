@@ -39,6 +39,7 @@ tracking = [
     "torchreid>=1.4", "gdown", "tensorboard",   # OSNet ReID (torchreid imports tensorboard/gdown eagerly)
     "torchvision>=0.16",                         # jersey-number ResNet-18 reader
     "nltk",                                      # PARSeq STR via torch.hub (scripts/eval_parseq_zeroshot.py)
+    "ultralytics>=8.4",                          # number localizer (YOLO11n) + SAM3 reference
 ]
 # Cross-camera fusion (docs/06): Hungarian (scipy) + court model from the DXF (ezdxf).
 fusion = ["scipy>=1.10", "ezdxf>=1.1"]
