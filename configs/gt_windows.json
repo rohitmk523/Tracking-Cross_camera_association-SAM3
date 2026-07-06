@@ -1,0 +1,11 @@
+[
+  {"name": "e6fba750_FL_47_12",
+   "videos": "data/clips/e6fba750_FL_47_12.mp4,data/clips/e6fba750_NR_47_12.mp4:-1",
+   "team_a": "TEAL", "team_b": "GREEN"},
+  {"name": "c2a354fe_333_14",
+   "videos": "data/clips/c2a354fe_NL_333_14.mp4:-3,data/clips/c2a354fe_NR_333_14.mp4:-1",
+   "team_a": "BLACK", "team_b": "WHITE"},
+  {"name": "e6fba750_fb",
+   "videos": "data/clips/e6fba750_FL_fb.mp4,data/clips/e6fba750_NR_fb.mp4:-1",
+   "team_a": "TEAL", "team_b": "GREEN"}
+]
