@@ -1,130 +1,91 @@
 # Cross-Camera Basketball Analysis — Progress
 
-_Last updated: 2026-07-03_
+_Last updated: 2026-07-06_
 
-**What it does:** four fixed cameras in → *who* is on court (identity, team, jersey), *where*
-they are (one top-down map), *what happened* (possessions, passes), and an AI commentator's
-play-by-play out. Runs on the existing rig (far-left, far-right, near-left, near-right).
+**What it does:** four fixed cameras in → *who* is on court (identity, team, **jersey number**),
+*where* they are (one top-down map), *what happened* (possessions, passes), and an AI
+commentator's play-by-play out. Runs on the existing rig.
 
 | Stage | Status |
 |---|---|
-| **1. Detect** (players / referees / ball, every frame) | ✅ Measured on held-out games: player 0.91 · referee 0.90 · ball 0.80 near-basket |
-| **2. Track** (follow each person per camera + team) | ✅ Working, hardened this week |
-| **3. Fuse** (4 cameras → one identity per player) | ✅ **Validated on a second, untouched game + independently cross-checked by SAM3** |
-| **4. Events** (possession / pass JSON) | 🔶 Engine built and tested — awaiting real ball tracking + ground-truth scoring |
-| **5. Narrate** (AI play-by-play) | ✅ Working, grounded on verified identities (set-of-marks video built) |
+| **1. Detect** (players / referees / ball) | ✅ Measured: player 0.91 · referee 0.90 · ball 0.80 near-basket (held-out games) |
+| **2. Track** (per camera + team) | ✅ Working, hardened |
+| **3. Fuse** (4 cameras → one identity per player) | ✅ Validated on a second game + SAM3 cross-checked |
+| **4. Jersey numbers → named players** | ✅ **NEW: live end-to-end, verified against visible jerseys** |
+| **5. Events** (possession / pass JSON) | 🔶 Engine ready; **accuracy now MEASURED against operator ground truth** — trained ball detector is the one remaining build |
+| **6. Narrate** (AI play-by-play) | ✅ Working, grounded — now with real jersey numbers to name |
 
 ---
 
-## 1 · Identity quality — the week's core result
+## 1 · NEW — Named players, end to end
 
-Three root causes were found by this week's audit and fixed; each fix was re-measured on the
-benchmark window (4 cameras, ~13 real people on court):
+The full trained jersey stack shipped this week, every model validated on **games it never
+trained on** (leave-games-out):
 
-- **Camera sync was silently broken.** The sync routine returned "0 offset" without warning
-  when a clip had no audio — one camera was fused **13 frames (~0.4s) out of step**. Now sync
-  is strict (the pipeline refuses to run rather than fuse unaligned cameras), and the true
-  offsets are measured and verified on every run.
-- **The fisheye lenses were never corrected.** Player positions were mapped to the court
-  through plain homographies on distorted pixels — the old calibrations only fit half their
-  reference points (metres of error elsewhere). We refit all four cameras with a per-camera
-  lens-distortion model: near-camera position error dropped from **~35cm to ~11–23cm**, and the
-  cameras now agree with each other well enough that identity matching tightened everywhere.
-- **Identity fragments and flicker.** Two clean-up passes: fragments of the same player
-  (dropout → reappearance) are stitched into one identity, and brief detection blinks
-  (91% of dropouts were 1–5 frames) are bridged by the motion model — flagged honestly as
-  predictions and drawn hollow on the map.
+- **Legibility gate** (is a number readable at all?) — 84.6%
+- **Number localizer** (find the number inside a player crop) — 99.2% mAP, trained in 9 min
+- **Number reader** (open-vocabulary scene-text model) — 95.3%, up from 89.1% zero-shot —
+  the operator's annotations demonstrably lifted cross-game accuracy
+- **Combined stack on unseen-game crops: 69% read correctly · 27% honest abstain · 5% wrong
+  → 94% precision when it commits an answer.** Every stage abstains rather than guesses,
+  and a per-player vote (≥2 agreeing reads, ≥60% majority) means one wrong read can never
+  name a player. Referees are structurally barred from carrying numbers.
+- **Live on both games** — e6: `A #11, B #6, B #11, B #22` (independently matching what the
+  AI commentator read with its own eyes last week); second game: **10 of 18 identities
+  named**, verified against the visible jerseys in the frames.
+- Everything downstream speaks names now: roster, events (`B #22 → B #7`), the marked video,
+  and the narrator's grounding.
 
-| Benchmark window | Before | After |
-|---|---|---|
-| Identities created for ~13 people | 30 | **16** |
-| Real people tracked ≥ half the clip | 12 | **13 — all of them** |
-| Phantom identities | 6 | **1** |
-| Court-map flicker (dropout gaps) | 234 | **5** |
-| Players per frame (median) | 11 | **13 = exactly the people on court** |
-| Frames over-counting | 28% | **~2%** |
+## 2 · NEW — Event accuracy is now a measured number
 
-## 2 · Verified twice, independently
+The operator ground-truth round completed (3 windows labeled with the new playlist tool —
+two cameras side by side so possession is never out of view). First scoring of the old
+experimental events against human truth:
 
-- **Second game, cold run.** The full stack ran untouched on another game (different teams,
-  black-vs-white kits, full-court sequence): **15 identities / 12 stable / 1 phantom / clean
-  5-v-5 + 3 referees** — the same quality profile as the tuned benchmark. The run also exposed
-  a real bug: black/white kits have no "colour", so team naming was a per-camera coin flip —
-  fixed with a brightness fallback (darker kit = Team A on every camera).
-- **SAM3 cross-check (independent model, cloud GPU).** We ran Meta's SAM3 — a completely
-  different model family — over both games (8 camera-clips) and compared box-for-box:
-  - **91–99% of everything our pipeline detects, SAM3 independently confirms** → our
-    false-positive rate is effectively clean, verified externally.
-  - Where the two disagree is localised and explainable: far-seeing cameras miss small
-    distant players (a known detector limit) — the 4-camera fusion already compensates by
-    letting each near camera own its half, which is why the fused output still tracks 13/13.
-  - SAM3's "we-see-it-you-don't" frames are saved as a **ranked hard-example list** — free
-    training data for the next detector improvement round.
-  - SAM3 itself needs ~20 min/clip on a GPU, so it's an offline referee, not a competitor.
+| Metric | Experimental events vs operator GT |
+|---|---|
+| Possession-team accuracy | **14%** (≈81% after correcting a since-fixed team-naming inversion) |
+| Possession changes | system claimed **11**, truth was **2** — over-firing confirmed |
+| Passes | precision 0.43 / recall 0.75 (timing good, phantoms invented) |
+| Turnovers | **0 detected correctly** — all 4 were fabricated, both real ones missed |
 
-## 3 · Team identification
+This is the audit's ball retraction, now quantified — and it is the **exam** the trained
+ball detector must pass. Every future events version gets this score automatically.
 
-- Teams are classified by **jersey colour** (saturation/brightness/hue features + clustering),
-  which fixed the earlier appearance-model failure on dark kits blending into shadows.
-- Only the **near cameras vote** on team (far-camera crops are too small to separate colours);
-  referee status comes from the detector and is accepted from any camera — both refs are now
-  correctly identified.
-- New this week: **achromatic-kit handling** (black vs white) — cluster naming anchors on
-  brightness when hue carries no signal, so all cameras name the teams consistently.
+## 3 · Identity layer (recap of last week's fixes — unchanged, still holding)
 
-## 4 · Jersey numbers (identity → real names)
+- Sync verified per run (one camera had been 13 frames off); fisheye lenses corrected
+  (position error ~35cm → ~11–23cm); fragments stitched; blink-free court map (dropout
+  gaps 234 → 5, players/frame median = exactly the people on court).
+- Benchmark window: **16 identities for 13 people, all 13 stable, 1 phantom**; cold-run on a
+  second game reproduced the profile.
+- **SAM3 cross-check** (independent model, cloud GPU): confirms **91–99%** of everything we
+  detect; its extra finds map to the known far-camera recall gap, which fusion's zone
+  design already compensates — and its disagreement frames are banked as free hard
+  examples for the next detector round.
 
-- **Plan upgraded to match what wins the SoccerNet jersey challenge:** a scene-text
-  recognition model (reads *any* number, including ones never seen in training) gated by a
-  legibility classifier — instead of a fixed-list classifier that can only output numbers it
-  was trained on.
-- **De-risked before spending annotation:** the pretrained recogniser already reads **78% of
-  our annotated crops with zero training** — so fine-tuning needs hundreds, not thousands, of
-  labels. Training machinery is built and smoke-tested (one command when labels are ready).
-- **Data quality fixed first:** the labelling queue now interleaves **all 25 games** (it was
-  burning every click on one game); the train/validation split is leak-proof (same play can
-  never appear on both sides); "unclear" marks now train the legibility gate instead of being
-  discarded; the tool validates every save, writes atomically, and keeps backups.
-- **Progress:** 99 usable labels across 8 games (target ~300–400). Once landed: fine-tune →
-  every "id14" becomes "#22" in the events, the demo video, and the narration.
+## 4 · Ball & events — the one remaining build
 
-## 5 · Ball & events — the honest part
+- **Interim (running now):** the retrained detector's near-basket ball (0.80) projected
+  through the corrected lenses → possession events → scored against the operator's GT.
+  Half-court possessions may already be usable; the score will say.
+- **The real fix (next):** a **trained motion-aware ball detector** (the audit-endorsed,
+  literature-standard design — learned model on top of the motion signal, not hand-tuned
+  rules). Teacher data plan: SAM3 with a "basketball" concept prompt generates pseudo-labels
+  on the GPU; the event-pool ball annotations anchor it; the operator's GT scores it.
+- Until it passes, events stay honestly gated: no ball → no fabricated possessions.
 
-- The audit **retracted** Wednesday's "full-court ball tracking works" claim: measurement
-  showed the motion tracker was following players (their moving limbs), not the ball. It is
-  now an explicit experimental flag, and events degrade honestly without a ball rather than
-  fabricating possession.
-- What stands: **near-basket ball detection works (0.80)** — where shots happen; and the
-  possession/pass engine itself is sound (its two proven failure modes were fixed and are
-  covered by tests).
-- The replacement is literature-backed and uses our existing data flywheel: a **trained
-  motion-aware ball detector** (the motion signal was the right idea — it needs a learned
-  model on top, not hand-tuned rules).
-- A **ground-truth labelling tool** now exists (~10 min of operator time per clip: who has
-  possession + pass/turnover moments) — the moment one clip is labelled, every event claim
-  becomes a measured precision/recall number, now and for every future version.
+## 5 · Where we are
 
-## 6 · Deliverables produced this week
+- **Working, verified, and named:** detection → tracking → fusion → jersey identity →
+  grounded narration. 43 automated tests pass. **Zero operator dependencies remain** — all
+  annotation targets were met and every set proved its value in a measured number.
+- **In flight:** interim ball baseline scoring (today); SAM3 ball-teacher probe (next).
+- **Next, in order:** ① trained ball detector → beat the 14% baseline → trustworthy
+  possession/pass events ② polish: fold the one duplicated-number fragment, re-cut the
+  client demo with named players ③ scale: run the full pipeline across more games.
+  *(Shot make/miss: separate repo.)*
 
-- **Pipeline demo video** (~40s): detect → track → fuse, with the same player carrying the
-  same number in every camera beside a live top-down court map, ending with the events JSON
-  and the AI commentator's actual output.
-- **Set-of-marks grounding video** for the narrator (boxes + identities burned in — measurably
-  reduces AI hallucination), ready to become names once jersey numbers land.
-- 38 automated tests pass; every result above is reproducible with one command from the repo.
-
----
-
-## Where we are
-
-- **Done + verified:** detection → tracking → 4-camera fusion → grounded narration, with
-  verified sync, corrected lenses, cross-game validation, and independent SAM3 confirmation.
-- **In progress (operator):** jersey labels — 99 usable across 8 games (target ~300–400);
-  ground-truth event labels not started.
-- **Next, in order:** ① jersey recogniser fine-tune → named players end-to-end
-  ② trained motion-aware ball detector → trustworthy possession/pass events
-  ③ score events against ground truth and tune the remaining occlusion under-count.
-  *(Shot make/miss stays out of scope — separate repo.)*
-
-**One line:** identity is solved and independently verified; jersey names and the ball tracker
-are the two remaining builds, and both have data pipelines, training code, and evaluation ready.
+**One line:** the identity promise is delivered and independently verified — the system now
+says "**B #22 passes to B #7**" from raw four-camera video; the ball tracker is the last
+build, and for the first time its success will be a single measured number.
