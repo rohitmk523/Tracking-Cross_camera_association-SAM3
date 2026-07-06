@@ -88,13 +88,10 @@ def index():
 
 @app.get("/frame/{i}")
 def frame(i: int):
-    import cv2
-    STATE["cap"].set(cv2.CAP_PROP_POS_FRAMES, max(0, min(i, STATE["n"] - 1)))
-    ok, img = STATE["cap"].read()
-    if not ok:
-        return Response(status_code=404)
-    _, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 82])
-    return Response(buf.tobytes(), media_type="image/jpeg")
+    # frames are pre-encoded at startup: cv2.VideoCapture is NOT thread-safe and fast
+    # stepping fires concurrent requests (libavcodec async_lock crash, seen live)
+    jpegs = STATE["jpegs"]
+    return Response(jpegs[max(0, min(i, len(jpegs) - 1))], media_type="image/jpeg")
 
 
 @app.get("/api/state")
@@ -107,11 +104,21 @@ async def mark(body: dict):
     gt = _gt()
     kind, f, val = body.get("kind"), int(body.get("frame", 0)), body.get("val") or {}
     if kind == "breakpoint" and val.get("holder") in ("A", "B", "loose"):
+        # NO-OP if the holder is already this value at frame f — pressing the key every
+        # frame (a natural operator instinct) must not spam hundreds of marks.
+        cur = "loose"
+        for b in sorted(gt["breakpoints"], key=lambda b: b["frame"]):
+            if b["frame"] <= f:
+                cur = b["holder"]
+        if cur == val["holder"]:
+            return gt
         gt["breakpoints"] = [b for b in gt["breakpoints"] if b["frame"] != f] \
             + [{"frame": f, "holder": val["holder"]}]
         gt["breakpoints"].sort(key=lambda b: b["frame"])
         STATE["ops"].append(("breakpoint", f))
     elif kind == "moment" and val.get("type") in ("pass", "turnover"):
+        if any(abs(m["frame"] - f) <= 5 and m["type"] == val["type"] for m in gt["moments"]):
+            return gt                              # duplicate press within 5 frames: ignore
         gt["moments"].append({"frame": f, "type": val["type"]})
         gt["moments"].sort(key=lambda m: m["frame"])
         STATE["ops"].append(("moment", f, val["type"]))
@@ -138,8 +145,16 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=8004)
     a = ap.parse_args()
     cap = cv2.VideoCapture(a.video)
-    STATE.update(video=a.video, cap=cap, n=int(cap.get(cv2.CAP_PROP_FRAME_COUNT)),
-                 fps=cap.get(cv2.CAP_PROP_FPS) or 30.0,
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    jpegs = []
+    while True:
+        ok, img = cap.read()
+        if not ok:
+            break
+        jpegs.append(cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 82])[1].tobytes())
+    cap.release()
+    print(f"pre-encoded {len(jpegs)} frames ({sum(map(len, jpegs)) // 1_000_000} MB in memory)")
+    STATE.update(video=a.video, jpegs=jpegs, n=len(jpegs), fps=fps,
                  out=Path(a.out or f"data/gt_events/{Path(a.video).stem}.json"))
     STATE["out"].parent.mkdir(parents=True, exist_ok=True)
     print(f"GT labeller: {a.video} ({STATE['n']} frames) -> {STATE['out']}")
