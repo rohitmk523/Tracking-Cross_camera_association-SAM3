@@ -72,7 +72,8 @@ def make_loader(root: Path, split: str, batch: int):
             name, lab = items[i]
             trip = cv2.imread(str(root / "images" / name))
             xs = np.split(trip, 3, axis=1)                       # 3x (H,W,3)
-            lx, ly = lab["x"], lab["y"]
+            is_neg = bool(lab.get("neg"))
+            lx, ly = (-1e6, -1e6) if is_neg else (lab["x"], lab["y"])
             if split == "train":
                 if np.random.rand() < 0.5:                       # horizontal flip
                     xs = [f[:, ::-1] for f in xs]
@@ -86,26 +87,33 @@ def make_loader(root: Path, split: str, batch: int):
             yy, xx = np.mgrid[0:H, 0:W]
             hm = np.exp(-((xx - lx) ** 2 + (yy - ly) ** 2) / (2 * SIGMA ** 2))
             return x, torch.from_numpy(hm.astype(np.float32))[None], \
-                torch.tensor([float(lx), float(ly)])
+                torch.tensor([float(lx), float(ly)])   # neg -> hm==0, xy==-1e6 sentinel
 
     return torch.utils.data.DataLoader(DS(), batch_size=batch, shuffle=(split == "train"),
                                        num_workers=0), len(items)
 
 
 def evaluate(model, loader, device):
+    """(hit-rate on POSITIVE frames, mean peak prob on NEGATIVE frames)."""
     import torch
     model.eval()
-    hits = n = 0
+    hits = n_pos = 0
+    neg_peaks = []
     with torch.no_grad():
         for x, _, xy in loader:
             logits = model(x.to(device))
             b, _, h, w = logits.shape
-            flat = logits.view(b, -1).argmax(1)
-            px, py = (flat % w).float().cpu(), (flat // w).float().cpu()
+            flat = logits.view(b, -1)
+            peak, arg = flat.max(1)
+            px, py = (arg % w).float().cpu(), (arg // w).float().cpu()
+            is_neg = xy[:, 0] < -1e5
             d = ((px - xy[:, 0]) ** 2 + (py - xy[:, 1]) ** 2) ** 0.5
-            hits += int((d <= HIT_PX).sum())
-            n += b
-    return hits / max(1, n)
+            hits += int((d[~is_neg] <= HIT_PX).sum())
+            n_pos += int((~is_neg).sum())
+            if is_neg.any():
+                neg_peaks.extend(torch.sigmoid(peak[is_neg.to(device)]).cpu().tolist())
+    neg_mean = sum(neg_peaks) / len(neg_peaks) if neg_peaks else 0.0
+    return hits / max(1, n_pos), neg_mean
 
 
 def main() -> int:
@@ -128,7 +136,8 @@ def main() -> int:
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=a.epochs)
     # heavily class-imbalanced heatmap: weighted BCE keeps the peak from collapsing to 0
     lossf = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor(200.0, device=device))
-    best, best_state = -1.0, None
+    best, best_state = -10.0, None
+    best_acc, best_neg = 0.0, 1.0
     for ep in range(1, a.epochs + 1):
         model.train()
         tot = 0.0
@@ -139,22 +148,25 @@ def main() -> int:
             opt.step()
             tot += float(loss)
         sched.step()
-        acc = evaluate(model, val, device)
+        acc, neg_peak = evaluate(model, val, device)
+        score = acc - neg_peak                        # reward hits, punish phantom peaks
         star = ""
-        if acc > best:
-            best = acc
+        if score > best:
+            best = score
+            best_acc, best_neg = acc, neg_peak
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
             star = "  <- best"
         print(f"epoch {ep:>2}: loss {tot / max(1, len(train)):.4f} | "
-              f"val hit@{HIT_PX:.0f}px {acc:.3f}{star}", flush=True)
+              f"val hit@{HIT_PX:.0f}px {acc:.3f} | neg-peak {neg_peak:.3f}{star}", flush=True)
     out = REPO / a.out
     out.parent.mkdir(parents=True, exist_ok=True)
     torch.save(best_state or model.state_dict(), out)
     (out.parent / "ballnet_report.json").write_text(json.dumps(
-        {"val_hit_at_px": best, "hit_px": HIT_PX, "n_train": n_tr, "n_val": n_va,
+        {"val_hit_at_px": best_acc, "val_neg_peak": best_neg,
+         "hit_px": HIT_PX, "n_train": n_tr, "n_val": n_va,
          "note": "leave-games-out val; teacher = SAM3 pseudo-labels; final exam = "
                  "eval_events_gt vs operator GT"}, indent=2))
-    print(f"\nbest val hit@{HIT_PX:.0f}px {best:.3f} -> {out}")
+    print(f"\nbest: hit@{HIT_PX:.0f}px {best_acc:.3f}, neg-peak {best_neg:.3f} -> {out}")
     return 0
 
 

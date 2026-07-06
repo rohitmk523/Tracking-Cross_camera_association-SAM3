@@ -98,7 +98,23 @@ def main() -> int:
             frames.append(cv2.resize(img, (W, H)))
         cap.release()
         sx, sy = W / (d.get("orig_w") or 1920), H / (d.get("orig_h") or 1080)
+        # NEGATIVES: frames where the (logo-filtered) teacher saw NO ball at all —
+        # without them the model learns "there is always a ball" and cannot abstain
+        # (measured: saturated 0.99 confidence on every frame, exam failure).
+        empty = [f for f in range(1, len(frames) - 1)
+                 if not frames_clean.get(str(f)) and f not in wanted]
+        neg = empty[::max(1, len(empty) // max(1, len(wanted) // 2))][:len(wanted) // 2]
         kept = 0
+        for f in neg:
+            trip = cv2.hconcat([frames[f - 1], frames[f], frames[f + 1]])
+            name = f"{sp.stem.replace('.sam3', '')}_f{f:04d}_neg.jpg"
+            cv2.imwrite(str(out / "images" / name), trip, [cv2.IMWRITE_JPEG_QUALITY, 88])
+            if a.val_games:
+                split = "val" if game in a.val_games.split(",") else "train"
+            else:
+                split_hash = hashlib.md5(f"{a.seed}:{game}".encode()).hexdigest()
+                split = "val" if int(split_hash[:8], 16) % 1000 < a.val_frac * 1000 else "train"
+            labels[name] = {"neg": True, "game": game, "split": split}
         for f, (bx, by) in wanted.items():
             if not (1 <= f < len(frames) - 1):
                 continue
@@ -114,7 +130,8 @@ def main() -> int:
             labels[name] = {"x": round(bx * sx, 2), "y": round(by * sy, 2),
                             "game": game, "split": split}
             kept += 1
-        print(f"{sp.stem}: {kept} triplets (of {len(wanted)} single-ball frames)")
+        print(f"{sp.stem}: {kept} pos + {len(neg)} neg triplets "
+              f"(of {len(wanted)} single-ball frames)")
     (out / "labels.json").write_text(json.dumps(labels))
     tr = sum(1 for v in labels.values() if v["split"] == "train")
     print(f"dataset: {len(labels)} triplets across {len(n_games)} games "

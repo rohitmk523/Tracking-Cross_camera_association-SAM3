@@ -59,6 +59,11 @@ def main() -> int:
     ap.add_argument("--worldstate", required=True)
     ap.add_argument("--weights", default="runs/rfdetr-s-1280-ourdata-v1/best.pth")
     ap.add_argument("--threshold", type=float, default=0.15)
+    ap.add_argument("--ball-json", default=None,
+                    help="template with {ang}: precomputed per-frame ball [x,y,conf] "
+                         "(e.g. BallNet output) — skips the RF-DETR ball pass")
+    ap.add_argument("--ball-conf", type=float, default=0.3,
+                    help="min confidence for precomputed ball positions")
     ap.add_argument("--out", default=None)
     ap.add_argument("--gt", default=None, help="default: data/gt_events/<game><suffix>.json variants")
     a = ap.parse_args()
@@ -77,7 +82,9 @@ def main() -> int:
                 for cam, lid in (t.get("members") or {}).items():
                     gmap[fr["frame"]][(cam, lid)] = t["global_id"]
 
-    detector = RFDETRDetector(a.weights, resolution=1280, threshold=a.threshold, model="small")
+    detector = None
+    if not a.ball_json:
+        detector = RFDETRDetector(a.weights, resolution=1280, threshold=a.threshold, model="small")
     ref_clip = Path(a.clip_dir) / f"{a.game}_{a.ref}{a.suffix}.mp4"
     votes: dict[int, list] = defaultdict(list)      # ref_frame -> [(ball_score, cam, lid)]
     for ang in a.cams.split(","):
@@ -96,16 +103,30 @@ def main() -> int:
             off_s, _ = audio_offset_seconds(str(ref_clip), str(clip))
             off = int(round(off_s * 29.97))
         n_attr = 0
-        for fi, img in enumerate(iter_video_frames(str(clip))):
-            balls = [d for d in detector.predict(img) if d.class_id == 2]
-            if not balls:
+        if a.ball_json:                             # precomputed ball (BallNet)
+            bp = Path(a.ball_json.format(ang=ang))
+            if not bp.exists():
+                print(f"  {ang}: no ball json {bp} — skipped")
                 continue
-            d = max(balls, key=lambda b: b.score)
-            bxy = ((d.box_xyxy[0] + d.box_xyxy[2]) / 2, (d.box_xyxy[1] + d.box_xyxy[3]) / 2)
-            tid = _attribute(bxy, players_by_f.get(fi, []))
-            if tid is not None:
-                votes[fi - off].append((float(d.score), ang, tid))
-                n_attr += 1
+            for f_str, (bx, by, conf) in json.loads(bp.read_text()).items():
+                if conf < a.ball_conf:
+                    continue
+                fi = int(f_str)
+                tid = _attribute((bx, by), players_by_f.get(fi, []))
+                if tid is not None:
+                    votes[fi - off].append((float(conf), ang, tid))
+                    n_attr += 1
+        else:
+            for fi, img in enumerate(iter_video_frames(str(clip))):
+                balls = [d for d in detector.predict(img) if d.class_id == 2]
+                if not balls:
+                    continue
+                d = max(balls, key=lambda b: b.score)
+                bxy = ((d.box_xyxy[0] + d.box_xyxy[2]) / 2, (d.box_xyxy[1] + d.box_xyxy[3]) / 2)
+                tid = _attribute(bxy, players_by_f.get(fi, []))
+                if tid is not None:
+                    votes[fi - off].append((float(d.score), ang, tid))
+                    n_attr += 1
         print(f"  {ang}: ball attributed to a player box in {n_attr} frames (sync {off:+d}f)",
               flush=True)
 
