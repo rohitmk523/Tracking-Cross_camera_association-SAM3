@@ -57,6 +57,15 @@ def _drop_static(frames_dict: dict, n_frames: int) -> dict:
     return out
 
 
+def _split(stem: str, game: str, a) -> str:
+    if a.val_clips:
+        return "val" if any(s in stem for s in a.val_clips.split(",")) else "train"
+    if a.val_games:
+        return "val" if game in a.val_games.split(",") else "train"
+    h = hashlib.md5(f"{a.seed}:{game}".encode()).hexdigest()
+    return "val" if int(h[:8], 16) % 1000 < a.val_frac * 1000 else "train"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--sam3-dir", default="runs/sam3_ball")
@@ -66,6 +75,10 @@ def main() -> int:
     ap.add_argument("--val-frac", type=float, default=0.25)
     ap.add_argument("--val-games", default=None,
                     help="comma list: force these games to val (overrides md5 split)")
+    ap.add_argument("--val-clips", default=None,
+                    help="comma list of SUBSTRINGS: clips matching go to val (highest precedence) — hold out exam WINDOWS while training on the same game's other footage")
+    ap.add_argument("--neg-ratio", type=float, default=0.5,
+                    help="negatives per positive (ball-absent triplets)")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
     import cv2
@@ -103,18 +116,14 @@ def main() -> int:
         # (measured: saturated 0.99 confidence on every frame, exam failure).
         empty = [f for f in range(1, len(frames) - 1)
                  if not frames_clean.get(str(f)) and f not in wanted]
-        neg = empty[::max(1, len(empty) // max(1, len(wanted) // 2))][:len(wanted) // 2]
+        n_neg = int(len(wanted) * a.neg_ratio)
+        neg = empty[::max(1, len(empty) // max(1, n_neg))][:n_neg]
         kept = 0
         for f in neg:
             trip = cv2.hconcat([frames[f - 1], frames[f], frames[f + 1]])
             name = f"{sp.stem.replace('.sam3', '')}_f{f:04d}_neg.jpg"
             cv2.imwrite(str(out / "images" / name), trip, [cv2.IMWRITE_JPEG_QUALITY, 88])
-            if a.val_games:
-                split = "val" if game in a.val_games.split(",") else "train"
-            else:
-                split_hash = hashlib.md5(f"{a.seed}:{game}".encode()).hexdigest()
-                split = "val" if int(split_hash[:8], 16) % 1000 < a.val_frac * 1000 else "train"
-            labels[name] = {"neg": True, "game": game, "split": split}
+            labels[name] = {"neg": True, "game": game, "split": _split(sp.stem, game, a)}
         for f, (bx, by) in wanted.items():
             if not (1 <= f < len(frames) - 1):
                 continue
@@ -122,13 +131,8 @@ def main() -> int:
             name = f"{sp.stem.replace('.sam3', '')}_f{f:04d}.jpg"
             cv2.imwrite(str(out / "images" / name), trip,
                         [cv2.IMWRITE_JPEG_QUALITY, 88])
-            if a.val_games:
-                split = "val" if game in a.val_games.split(",") else "train"
-            else:
-                split_hash = hashlib.md5(f"{a.seed}:{game}".encode()).hexdigest()
-                split = "val" if int(split_hash[:8], 16) % 1000 < a.val_frac * 1000 else "train"
             labels[name] = {"x": round(bx * sx, 2), "y": round(by * sy, 2),
-                            "game": game, "split": split}
+                            "game": game, "split": _split(sp.stem, game, a)}
             kept += 1
         print(f"{sp.stem}: {kept} pos + {len(neg)} neg triplets "
               f"(of {len(wanted)} single-ball frames)")

@@ -64,6 +64,11 @@ def main() -> int:
                          "(e.g. BallNet output) — skips the RF-DETR ball pass")
     ap.add_argument("--ball-conf", type=float, default=0.3,
                     help="min confidence for precomputed ball positions")
+    ap.add_argument("--gate-px", type=float, default=90.0,
+                    help="temporal gate: a ball peak must be within this of the previous "
+                         "accepted peak (per frame of gap), else it needs --gate-k "
+                         "consecutive agreeing frames to re-acquire — balls don't teleport")
+    ap.add_argument("--gate-k", type=int, default=3)
     ap.add_argument("--out", default=None)
     ap.add_argument("--gt", default=None, help="default: data/gt_events/<game><suffix>.json variants")
     a = ap.parse_args()
@@ -108,14 +113,40 @@ def main() -> int:
             if not bp.exists():
                 print(f"  {ang}: no ball json {bp} — skipped")
                 continue
-            for f_str, (bx, by, conf) in json.loads(bp.read_text()).items():
-                if conf < a.ball_conf:
+            raw = sorted(((int(f), v) for f, v in json.loads(bp.read_text()).items()
+                          if v[2] >= a.ball_conf))
+            # TEMPORAL GATE: accept a peak only if continuous with the last accepted one;
+            # a jump must persist gate_k consecutive frames (mutually consistent) before
+            # re-acquiring. Confident-but-teleporting peaks (the round-3 churn) are dropped.
+            accepted: list[tuple] = []
+            last = None                              # (frame, x, y)
+            pending: list[tuple] = []
+            n_gated = 0
+            for fi, (bx, by, conf) in raw:
+                if last is not None and \
+                        ((bx - last[1]) ** 2 + (by - last[2]) ** 2) ** 0.5 \
+                        <= a.gate_px * max(1, fi - last[0]):
+                    accepted.append((fi, bx, by, conf))
+                    last = (fi, bx, by)
+                    pending = []
                     continue
-                fi = int(f_str)
+                pending = [(pf, px_, py_, pc) for pf, px_, py_, pc in pending
+                           if fi - pf <= a.gate_k + 1 and
+                           ((bx - px_) ** 2 + (by - py_) ** 2) ** 0.5
+                           <= a.gate_px * max(1, fi - pf)]
+                pending.append((fi, bx, by, conf))
+                if len(pending) >= a.gate_k:         # sustained new location: re-acquire
+                    accepted.extend(pending)
+                    last = (fi, bx, by)
+                    pending = []
+                else:
+                    n_gated += 1
+            for fi, bx, by, conf in accepted:
                 tid = _attribute((bx, by), players_by_f.get(fi, []))
                 if tid is not None:
                     votes[fi - off].append((float(conf), ang, tid))
                     n_attr += 1
+            print(f"    {ang}: temporal gate dropped {n_gated} teleporting peaks", flush=True)
         else:
             for fi, img in enumerate(iter_video_frames(str(clip))):
                 balls = [d for d in detector.predict(img) if d.class_id == 2]
