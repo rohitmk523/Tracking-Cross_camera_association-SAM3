@@ -19,8 +19,7 @@ import argparse
 import json
 from pathlib import Path
 
-PROMPTS = ["basketball player", "basketball referee"]   # colour-neutral (DEMO finding:
-                                                        # per-colour prompts under-detect)
+DEFAULT_PROMPTS = "basketball player,basketball referee"   # colour-neutral (DEMO finding)
 
 
 def main() -> int:
@@ -30,6 +29,7 @@ def main() -> int:
     ap.add_argument("--weights", default="sam3.pt")
     ap.add_argument("--imgsz", type=int, default=1280)
     ap.add_argument("--conf", type=float, default=0.3)
+    ap.add_argument("--prompts", default=DEFAULT_PROMPTS, help="comma-separated concepts")
     a = ap.parse_args()
 
     import numpy as np
@@ -44,7 +44,8 @@ def main() -> int:
     print(f"[run] {a.video} on {device} (imgsz={a.imgsz}, conf={a.conf})", flush=True)
 
     out: dict[int, list] = {}
-    results = predictor(source=a.video, text=PROMPTS, stream=True)
+    prompts = [s.strip() for s in a.prompts.split(",") if s.strip()]
+    results = predictor(source=a.video, text=prompts, stream=True)
     for fidx, r in enumerate(results):
         boxes = getattr(r, "boxes", None)
         rows = []
@@ -69,7 +70,7 @@ def main() -> int:
     del predictor
 
     Path(a.out).write_text(json.dumps(
-        {"mode": "ultralytics-video", "prompts": PROMPTS, "video": a.video,
+        {"mode": "ultralytics-video", "prompts": prompts, "video": a.video,
          "n_frames": len(out), "frames": {str(k): v for k, v in sorted(out.items())}}))
     n = sum(len(v) for v in out.values())
     print(f"[done] {n} boxes over {len(out)} frames -> {a.out}", flush=True)

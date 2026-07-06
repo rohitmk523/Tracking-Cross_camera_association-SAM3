@@ -27,8 +27,12 @@ DEFAULT_CLIPS = [f"data/clips/{gid}_{ang}_{tag}.mp4"
                  for gid, tag in (("e6fba750", "47_12"), ("c2a354fe", "333_14"))
                  for ang in ("FL", "FR", "NL", "NR")]
 PREFIX = "_tmp_sam3_ref"
-RESULTS_KEY = f"{PREFIX}/sam3_ref_results.tar.gz"
-LOG_KEY = f"{PREFIX}/sam3_ref.log"
+
+
+def results_key(tag): return f"{PREFIX}/sam3_{tag}_results.tar.gz"
+
+
+def log_key(tag): return f"{PREFIX}/sam3_{tag}.log"
 WEIGHTS_KEY = f"{PREFIX}/sam3.pt"
 WEIGHTS_LOCAL = Path("/Users/rohitkale/Cellstrat/GitHub_Repositories/DEMO_UBALL/demo/sam3.pt")
 
@@ -82,7 +86,8 @@ def bundle(clips: list[str]) -> Path:
     return tmp
 
 
-def userdata(bundle_url: str, weights_url: str, results_url: str, log_url: str) -> str:
+def userdata(bundle_url: str, weights_url: str, results_url: str, log_url: str,
+             prompts: str = "basketball player,basketball referee") -> str:
     return f"""#!/bin/bash
 exec > /var/log/sam3.log 2>&1
 export HOME=/root PYTHONUNBUFFERED=1
@@ -106,7 +111,7 @@ RC_ALL=0
 for C in clips/*.mp4; do
   B=$(basename "$C" .mp4)
   echo "=== SAM3 on $B ==="
-  $PYBIN sam3_reference.py --video "$C" --out "out/$B.sam3.json" --weights /work/sam3.pt || RC_ALL=1
+  $PYBIN sam3_reference.py --video "$C" --out "out/$B.sam3.json" --weights /work/sam3.pt --prompts "{prompts}" || RC_ALL=1
 done
 tar czf results.tar.gz -C out .
 CODE=$(curl -sS --max-time 1800 -w '%{{http_code}}' -o /dev/null -T results.tar.gz "{results_url}")
@@ -133,7 +138,8 @@ def launch(a) -> None:
                                          Params={"Bucket": bucket, "Key": key}, ExpiresIn=exp)
 
     ud = userdata(presign("get", bundle_key, 28800), presign("get", WEIGHTS_KEY, 28800),
-                  presign("put", RESULTS_KEY, 86400), presign("put", LOG_KEY, 86400))
+                  presign("put", results_key(a.tag), 86400), presign("put", log_key(a.tag), 86400),
+                  prompts=a.prompts)
     ec2 = boto3.client("ec2", region_name=region)
     r = ec2.run_instances(
         ImageId=aws.get("ami"), InstanceType=aws.get("instance_type", "g5.2xlarge"),
@@ -146,18 +152,18 @@ def launch(a) -> None:
                             "Tags": [{"Key": "Name", "Value": "uball-sam3-reference"}]}])
     iid = r["Instances"][0]["InstanceId"]
     print(f"launched {iid} ({aws.get('instance_type')}) — self-terminates when done")
-    print(f"log:     s3://{bucket}/{LOG_KEY}")
-    print(f"results: s3://{bucket}/{RESULTS_KEY}   (then: --fetch)")
+    print(f"log:     s3://{bucket}/{log_key(a.tag)}")
+    print(f"results: s3://{bucket}/{results_key(a.tag)}   (then: --fetch --tag {a.tag})")
 
 
 def fetch(a) -> None:
     import boto3
     aws = _aws_cfg()
     s3 = boto3.client("s3", region_name=aws.get("region", "us-east-1"))
-    out = REPO / "runs" / "sam3_ref"
+    out = REPO / "runs" / f"sam3_{a.tag}"
     out.mkdir(parents=True, exist_ok=True)
     tar_path = out / "results.tar.gz"
-    s3.download_file(aws.get("s3_bucket"), RESULTS_KEY, str(tar_path))
+    s3.download_file(aws.get("s3_bucket"), results_key(a.tag), str(tar_path))
     with tarfile.open(tar_path) as t:
         t.extractall(out, filter="data")
     print(f"results -> {out}: {sorted(p.name for p in out.glob('*.sam3.json'))}")
@@ -167,13 +173,15 @@ def log(a) -> None:
     import boto3
     aws = _aws_cfg()
     s3 = boto3.client("s3", region_name=aws.get("region", "us-east-1"))
-    body = s3.get_object(Bucket=aws.get("s3_bucket"), Key=LOG_KEY)["Body"].read().decode()
+    body = s3.get_object(Bucket=aws.get("s3_bucket"), Key=log_key(a.tag))["Body"].read().decode()
     print(body[-int(a.tail):])
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--clips", nargs="*", default=DEFAULT_CLIPS)
+    ap.add_argument("--tag", default="ref", help="job tag: scopes S3 keys + runs/sam3_<tag>/")
+    ap.add_argument("--prompts", default="basketball player,basketball referee")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--fetch", action="store_true")
     ap.add_argument("--log", action="store_true")
