@@ -72,15 +72,24 @@ def make_loader(root: Path, split: str, batch: int):
             name, lab = items[i]
             trip = cv2.imread(str(root / "images" / name))
             xs = np.split(trip, 3, axis=1)                       # 3x (H,W,3)
-            x = np.concatenate(xs, axis=2).astype(np.float32) / 255.0
+            lx, ly = lab["x"], lab["y"]
+            if split == "train":
+                if np.random.rand() < 0.5:                       # horizontal flip
+                    xs = [f[:, ::-1] for f in xs]
+                    lx = W - 1 - lx
+                a = np.random.uniform(0.7, 1.3)                  # brightness/contrast jitter
+                b = np.random.uniform(-25, 25)
+                xs = [np.clip(f.astype(np.float32) * a + b, 0, 255) for f in xs]
+            x = np.concatenate([np.ascontiguousarray(f) for f in xs],
+                               axis=2).astype(np.float32) / 255.0
             x = torch.from_numpy(x).permute(2, 0, 1)             # 9,H,W
             yy, xx = np.mgrid[0:H, 0:W]
-            hm = np.exp(-((xx - lab["x"]) ** 2 + (yy - lab["y"]) ** 2) / (2 * SIGMA ** 2))
+            hm = np.exp(-((xx - lx) ** 2 + (yy - ly) ** 2) / (2 * SIGMA ** 2))
             return x, torch.from_numpy(hm.astype(np.float32))[None], \
-                torch.tensor([lab["x"], lab["y"]])
+                torch.tensor([float(lx), float(ly)])
 
     return torch.utils.data.DataLoader(DS(), batch_size=batch, shuffle=(split == "train"),
-                                       num_workers=2), len(items)
+                                       num_workers=0), len(items)
 
 
 def evaluate(model, loader, device):
@@ -116,6 +125,7 @@ def main() -> int:
     print(f"train {n_tr} / val {n_va} triplets on {device}")
     model = build_model().to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=a.lr)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=a.epochs)
     # heavily class-imbalanced heatmap: weighted BCE keeps the peak from collapsing to 0
     lossf = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor(200.0, device=device))
     best, best_state = -1.0, None
@@ -128,6 +138,7 @@ def main() -> int:
             loss.backward()
             opt.step()
             tot += float(loss)
+        sched.step()
         acc = evaluate(model, val, device)
         star = ""
         if acc > best:
