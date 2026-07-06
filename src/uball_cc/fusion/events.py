@@ -108,6 +108,95 @@ def _possession_runs(frames, by_frame, ball_by_frame):
     return [r for r in runs if (r[1] - r[0] + 1) >= MIN_POSS_FRAMES]
 
 
+def _events_from_runs(runs, label, frames0: int, fps: float) -> tuple[list[dict], int, int]:
+    """Possession runs [(sf, ef, gid, team)] -> possession/pass/turnover events."""
+    events: list[dict] = []
+    n_pass = n_to = 0
+
+    def t_of(f):
+        return round((f - frames0) / fps, 2)
+
+    for i, (sf, ef, gid, team) in enumerate(runs):
+        events.append({"event": "possession", "t_sec": t_of(sf), "frame_window": [sf, ef],
+                       "player_id": gid, "player": label.get(gid, str(gid)), "team": team,
+                       "confidence": 0.6, "needs_frame_check": False})
+        if i > 0:
+            psf, pef, pgid, pteam = runs[i - 1]
+            if sf - pef <= PASS_MAX_GAP_FRAMES and pgid != gid:
+                same = pteam == team
+                events.append({"event": "pass" if same else "turnover", "t_sec": t_of(pef),
+                               "frame": pef, "from_id": pgid, "from": label.get(pgid, str(pgid)),
+                               "to_id": gid, "to": label.get(gid, str(gid)),
+                               "from_team": pteam, "to_team": team,
+                               "confidence": 0.45, "needs_frame_check": True})
+                if same:
+                    n_pass += 1
+                else:
+                    n_to += 1
+    return events, n_pass, n_to
+
+
+def holder_runs(frames: list[int], holder_by_frame: dict[int, int],
+                team_of: dict[int, str | None]) -> list[tuple]:
+    """Collapse a per-frame {frame: global_id} HOLDER stream (e.g. image-space possession)
+    into runs [(sf, ef, gid, team)], with the same hysteresis discipline as the court-space
+    path: a challenger must persist SWITCH_FRAMES (LOOSE_CONFIRM_FRAMES from loose) and
+    runs shorter than MIN_POSS_FRAMES are dropped."""
+    raw = {}
+    holder, challenger, ch_count = None, None, 0
+    for f in frames:
+        gid = holder_by_frame.get(f)
+        if gid is None:
+            challenger, ch_count = None, 0
+            if holder is not None and f - max(raw, default=f) > PASS_MAX_GAP_FRAMES:
+                holder = None
+            continue
+        if gid == holder:
+            challenger, ch_count = None, 0
+        else:
+            ch_count = ch_count + 1 if gid == challenger else 1
+            challenger = gid
+            need = LOOSE_CONFIRM_FRAMES if holder is None else SWITCH_FRAMES
+            if ch_count >= need:
+                holder = gid
+                challenger, ch_count = None, 0
+        if holder is not None and gid == holder:
+            raw[f] = holder
+    runs, cur = [], None
+    for f in frames:
+        h = raw.get(f)
+        if h is None:
+            if cur:
+                runs.append(cur)
+                cur = None
+            continue
+        if cur and cur[2] == h:
+            cur = (cur[0], f, h, cur[3])
+        else:
+            if cur:
+                runs.append(cur)
+            cur = (f, f, h, team_of.get(h))
+    if cur:
+        runs.append(cur)
+    return [r for r in runs if (r[1] - r[0] + 1) >= MIN_POSS_FRAMES]
+
+
+def derive_events_from_holders(world_state: dict, holder_by_frame: dict[int, int],
+                               fps: float | None = None) -> dict:
+    """Event stream from an IMAGE-SPACE possession stream {frame: holder global_id} —
+    sidesteps the flat-court projection error for elevated balls (a held ball overlaps
+    its holder's box in the camera image; no geometry involved)."""
+    fps = fps or world_state.get("fps", 29.97)
+    frames, _ = _frame_index(world_state)
+    label = _roster_label(world_state)
+    team_of = {p["global_id"]: p.get("team") for p in world_state.get("players", [])}
+    runs = holder_runs(frames, holder_by_frame, team_of)
+    events, n_pass, n_to = _events_from_runs(runs, label, frames[0] if frames else 0, fps)
+    return {"events": events,
+            "summary": {"has_ball": True, "source": "image-space",
+                        "n_events": len(events), "n_passes": n_pass, "n_turnovers": n_to}}
+
+
 def derive_events(world_state: dict, ball_by_frame: dict[int, tuple] | None = None,
                   fps: float | None = None) -> dict:
     """World-state (+ optional {frame: (court_x, court_y)} ball trace) -> event stream JSON."""
@@ -125,23 +214,8 @@ def derive_events(world_state: dict, ball_by_frame: dict[int, tuple] | None = No
     n_pass = n_to = 0
     if has_ball:
         runs = _possession_runs(frames, by_frame, ball_by_frame)
-        for i, (sf, ef, gid, team) in enumerate(runs):
-            events.append({"event": "possession", "t_sec": t_of(sf), "frame_window": [sf, ef],
-                           "player_id": gid, "player": label.get(gid, str(gid)), "team": team,
-                           "confidence": 0.6, "needs_frame_check": False})
-            if i > 0:
-                psf, pef, pgid, pteam = runs[i - 1]
-                if sf - pef <= PASS_MAX_GAP_FRAMES and pgid != gid:
-                    same = pteam == team
-                    events.append({"event": "pass" if same else "turnover", "t_sec": t_of(pef),
-                                   "frame": pef, "from_id": pgid, "from": label.get(pgid, str(pgid)),
-                                   "to_id": gid, "to": label.get(gid, str(gid)),
-                                   "from_team": pteam, "to_team": team,
-                                   "confidence": 0.45, "needs_frame_check": True})
-                    if same:
-                        n_pass += 1
-                    else:
-                        n_to += 1
+        ev, n_pass, n_to = _events_from_runs(runs, label, frames[0] if frames else 0, fps)
+        events.extend(ev)
     else:
         caveats.append("No ball trace: possession / pass / turnover events skipped. "
                        "Ball detection on the far cameras is the blocker (Stage 4 next step).")
