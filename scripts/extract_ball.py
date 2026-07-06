@@ -27,6 +27,9 @@ def main() -> int:
     ap.add_argument("--suffix", default="_47_12", help="clip name suffix after the angle")
     ap.add_argument("--calib-dir", default="configs/calib")
     ap.add_argument("--weights", default="runs/rfdetr-s-1280-ourdata-v1/best.pth")
+    ap.add_argument("--cams", default="NL,NR",
+                    help="near cams by default: the retrained ball AP (0.80) is near-basket")
+    ap.add_argument("--ref", default="FL", help="reference angle for the fused timeline")
     ap.add_argument("--threshold", type=float, default=0.15, help="lower for the small ball")
     ap.add_argument("--region-pad", type=float, default=400.0, help="ball can leave the calib hull more")
     ap.add_argument("--out", default=None)
@@ -37,20 +40,24 @@ def main() -> int:
     import sys
     sys.path.insert(0, "src")
     from uball_cc.detection.base import RFDETRDetector
-    from uball_cc.fusion.homography import (calib_hull, homography_from_calib, in_calib_region,
-                                            load_calib, project)
+    from uball_cc.fusion.audiosync import audio_offset_seconds
+    from uball_cc.fusion.homography import calib_hull, in_calib_region, load_calib, project_pixels
     from uball_cc.tracking import iter_video_frames
 
-    angles = ("FL", "FR", "NL", "NR")
+    angles = tuple(a.cams.split(","))
+    ref_clip = Path(a.clip_dir) / f"{a.game}_{a.ref}{a.suffix}.mp4"
     detector = RFDETRDetector(a.weights, resolution=1280, threshold=a.threshold, model="small")
-    per_cam: dict[str, dict[int, tuple]] = {}     # angle -> {frame: (court_x, court_y)}
+    per_cam: dict[str, dict[int, tuple]] = {}     # angle -> {ref_frame: (court_x, court_y)}
     for ang in angles:
         clip = Path(a.clip_dir) / f"{a.game}_{ang}{a.suffix}.mp4"
         if not clip.exists():
             print(f"  {ang}: clip missing {clip}")
             continue
+        off = 0
+        if ang != a.ref and ref_clip.exists():    # put every camera on the REF timeline
+            off_s, _ = audio_offset_seconds(str(ref_clip), str(clip))
+            off = int(round(off_s * 29.97))
         calib = load_calib(Path(a.calib_dir) / f"{ang}.json")
-        h = homography_from_calib(calib)
         hull = calib_hull(calib)
         got = {}
         n_ball = 0
@@ -61,12 +68,12 @@ def main() -> int:
             d = max(balls, key=lambda b: b.score)
             cx = (d.box_xyxy[0] + d.box_xyxy[2]) / 2.0
             cy = (d.box_xyxy[1] + d.box_xyxy[3]) / 2.0
-            court = project([(cx, cy)], h)[0]
+            court = project_pixels([(cx, cy)], calib)[0]   # undistort + homography
             if in_calib_region(court, hull, a.region_pad):
-                got[fi] = (float(court[0]), float(court[1]))
+                got[fi - off] = (float(court[0]), float(court[1]))
                 n_ball += 1
         per_cam[ang] = got
-        print(f"  {ang}: ball detected+projected in {n_ball} frames", flush=True)
+        print(f"  {ang}: ball detected+projected in {n_ball} frames (sync {off:+d}f)", flush=True)
 
     # fuse across cameras: per-frame median of projected ball positions
     all_frames = sorted({f for cam in per_cam.values() for f in cam})
