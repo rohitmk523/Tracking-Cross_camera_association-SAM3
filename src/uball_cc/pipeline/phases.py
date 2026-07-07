@@ -97,14 +97,17 @@ def run_fuse(job: Job, store: JobStore, *, calib_dir: Path = DEFAULT_CALIB_DIR,
              gate_cost: float = TUNED["gate_cost"], w_t: float = TUNED["w_t"],
              w_a: float = TUNED["w_a"], min_hits: int = TUNED["min_hits"],
              cluster_dist: float = TUNED["cluster_dist"], region_pad: float = 800.0,
-             audio_sync: bool = True, ball: str = "none", emit_coast: int = 12) -> dict:
+             audio_sync: bool = True, ball: str = "appearance", emit_coast: int = 12) -> dict:
     """Fuse per-camera tracks into the world-state (+ events).
 
-    ball: "none" (default) derives events WITHOUT a ball — possession/pass are skipped with
-    an honest caveat. "motion" opts into the EXPERIMENTAL motion-fusion ball tracker, which
-    the 2026-07-02 audit showed follows players rather than the ball (median 77cm from the
-    nearest player); do not trust its possession events until the trained motion-aware
-    detector replaces it."""
+    ball:
+      "appearance" (default) — the honest partial: the detector's near-basket ball
+        detections attributed IN IMAGE SPACE (possession.attribute_ball). Measured vs
+        operator GT: zero wrong possessions; coverage limited to where the ball is
+        actually visible — silence elsewhere, never fabrication.
+      "none" — derive events without any ball (possession/pass skipped, caveat emitted).
+      "motion" — EXPERIMENTAL motion-fusion tracker (2026-07-02 audit: follows players,
+        not the ball); do not trust its possession events."""
     from uball_cc.fusion.audiosync import audio_offset_seconds
     from uball_cc.fusion.court import LENGTH, WIDTH
     from uball_cc.fusion.engine import FusionEngine, Observation
@@ -114,7 +117,7 @@ def run_fuse(job: Job, store: JobStore, *, calib_dir: Path = DEFAULT_CALIB_DIR,
     trk = job.dir / "track"
     ref = ref_angle or ("FL" if "FL" in job.angles else job.angles[0])
     fps = 29.97
-    aligned, reid_maps = {}, {}
+    aligned, reid_maps, offsets = {}, {}, {}
     for ang in job.angles:
         calib = load_calib(calib_dir / f"{ang}.json")
         hull = calib_hull(calib)                          # gate to the camera's calibrated region
@@ -127,6 +130,7 @@ def run_fuse(job: Job, store: JobStore, *, calib_dir: Path = DEFAULT_CALIB_DIR,
         if audio_sync and ang != ref:
             off_s, _ = audio_offset_seconds(store.video(job, ref), store.video(job, ang))
             off = int(round(off_s * fps))
+        offsets[ang] = off
         per_frame: dict[int, list] = defaultdict(list)
         for t, c in zip(tracks, court):
             in_court = -300 <= c[0] <= LENGTH + 300 and -300 <= c[1] <= WIDTH + 300
@@ -171,10 +175,46 @@ def run_fuse(job: Job, store: JobStore, *, calib_dir: Path = DEFAULT_CALIB_DIR,
     from uball_cc.fusion.tracklets import apply_merges, merge_map
     ws = apply_merges(ws, merge_map(frames_out))
     frames_out = ws["frames"]
-    # --- ball -> world-state + event stream (docs/08; ball="none" degrades honestly) ---
-    from uball_cc.fusion.events import derive_events
+    # --- ball -> world-state + event stream (docs/08; silence over fabrication) ---
+    from uball_cc.fusion.events import derive_events, derive_events_from_holders
     ball_xy: dict[int, tuple] = {}
-    if ball == "motion":                     # EXPERIMENTAL (see docstring / audit 2026-07-02)
+    events = None
+    if ball == "appearance":
+        # the honest partial: near-basket detector ball, attributed in IMAGE space
+        from collections import defaultdict as _dd
+
+        from uball_cc.fusion.possession import attribute_ball, holder_stream_from_votes
+        gmap: dict[int, dict] = _dd(dict)
+        for fr in frames_out:
+            for t in fr["tracks"]:
+                if not t.get("coasting"):
+                    for cam, lid in (t.get("members") or {}).items():
+                        gmap[fr["frame"]][(cam, lid)] = t["global_id"]
+        votes: dict[int, list] = _dd(list)
+        for ang in job.angles:
+            if ang not in JERSEY_CAMS:                       # near cams: ball AP is near-basket
+                continue
+            det_p = job.dir / "detect" / f"{ang}.json"
+            if not det_p.exists():
+                continue
+            players_by_f: dict[int, list] = _dd(list)
+            for r in json.loads((trk / f"{ang}.json").read_text())["tracks"]:
+                if r.get("class_id") == 0 and r.get("team") != "REF":
+                    players_by_f[r["frame"]].append((r["track_id"], tuple(r["box_xyxy"])))
+            det = json.loads(det_p.read_text())
+            for fi, frame_dets in enumerate(det["detections"]):
+                balls = [d for d in frame_dets if d["c"] == 2]
+                if not balls:
+                    continue
+                d = max(balls, key=lambda b: b["s"])
+                bxy = ((d["b"][0] + d["b"][2]) / 2, (d["b"][1] + d["b"][3]) / 2)
+                tid = attribute_ball(bxy, players_by_f.get(fi, []))
+                if tid is not None:
+                    votes[fi - offsets.get(ang, 0)].append((float(d["s"]), ang, tid))
+        holders = holder_stream_from_votes(votes, gmap)
+        events = derive_events_from_holders(ws, holders, fps=fps)
+        events["summary"]["holder_frames"] = len(holders)
+    elif ball == "motion":                   # EXPERIMENTAL (see docstring / audit 2026-07-02)
         from uball_cc.fusion.ball_fuse import multicam_ball_trace
         clips = {ang: str(store.video(job, ang)) for ang in job.angles}
         trace = multicam_ball_trace(clips, str(calib_dir), ref=ref, audio_sync=audio_sync, zone=ZONE)
@@ -182,7 +222,8 @@ def run_fuse(job: Job, store: JobStore, *, calib_dir: Path = DEFAULT_CALIB_DIR,
     for fr in frames_out:
         fr["ball"] = ball_xy.get(fr["frame"])
     ws["ball"] = {str(f): list(v) for f, v in ball_xy.items()}
-    events = derive_events(ws, ball_by_frame=ball_xy or None, fps=fps)
+    if events is None:
+        events = derive_events(ws, ball_by_frame=ball_xy or None, fps=fps)
     ws["events"] = events
     out = job.dir / "fuse"
     out.mkdir(parents=True, exist_ok=True)
