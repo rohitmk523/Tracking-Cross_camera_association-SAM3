@@ -69,6 +69,11 @@ def main() -> int:
                          "accepted peak (per frame of gap), else it needs --gate-k "
                          "consecutive agreeing frames to re-acquire — balls don't teleport")
     ap.add_argument("--gate-k", type=int, default=3)
+    ap.add_argument("--smooth", type=int, default=0,
+                    help="holder-stream majority smoothing half-window in frames (0 = off). "
+                         "Fast breaks churn the per-frame holder between nearby players; a "
+                         "frame keeps a holder only if one gid wins >=60%% of the attributed "
+                         "frames within +-smooth (and >=1/3 of the window is attributed)")
     ap.add_argument("--out", default=None)
     ap.add_argument("--gt", default=None, help="default: data/gt_events/<game><suffix>.json variants")
     a = ap.parse_args()
@@ -176,9 +181,27 @@ def main() -> int:
     print(f"holder stream: {n_mapped} frames mapped to global identities "
           f"(of {len(votes)} attributed)", flush=True)
 
+    if a.smooth:
+        from collections import Counter
+        win = a.smooth
+        smoothed: dict[int, int] = {}
+        lo, hi = min(holder_by_frame), max(holder_by_frame)
+        for f in range(lo, hi + 1):
+            vals = [holder_by_frame[g] for g in range(f - win, f + win + 1)
+                    if g in holder_by_frame]
+            if len(vals) * 3 < 2 * win + 1:          # too sparse to trust a majority
+                continue
+            gid, cnt = Counter(vals).most_common(1)[0]
+            if cnt >= 0.6 * len(vals):
+                smoothed[f] = gid
+        print(f"smoothing +-{win}: {len(holder_by_frame)} raw -> {len(smoothed)} frames",
+              flush=True)
+        holder_by_frame = smoothed
     ev = derive_events_from_holders(ws, holder_by_frame)
     out = Path(a.out or f"runs/tracking/{a.game}{a.suffix}_events_imagespace.json")
-    out.write_text(json.dumps({"events": ev, "holder_frames": len(holder_by_frame)}, indent=1))
+    out.write_text(json.dumps({"events": ev, "holder_frames": len(holder_by_frame),
+                               "holder_stream": {str(f): g for f, g
+                                                 in sorted(holder_by_frame.items())}}, indent=1))
     poss = [(e["frame_window"], e["team"], e["player"]) for e in ev["events"]
             if e["event"] == "possession"]
     print(f"events: {ev['summary']} -> {out}")
