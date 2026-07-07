@@ -77,6 +77,16 @@ class GlobalTrack:
         return self._team.most_common(1)[0][0] if self._team else None
 
     @property
+    def team_locked(self) -> bool:
+        """team is ESTABLISHED: enough votes and >=80% agreement. Used to hard-gate
+        cross-team association (fast-break fix: an A-cluster must never be absorbed
+        into a well-attested B-track just because the two players are close)."""
+        if not self._team:
+            return False
+        total = sum(self._team.values())
+        return total >= 10 and self._team.most_common(1)[0][1] / total >= 0.8
+
+    @property
     def jersey(self) -> int | None:
         if not self._jersey or self.team == "REF":   # refs never carry a number: votes can
             return None                              # leak in via mixed player/ref merges
@@ -147,6 +157,8 @@ class FusionEngine:
             return _LARGE
         c = self.w_d * (d / 100.0)
         if team and t.team and team != t.team:
+            if t.team_locked:
+                return _LARGE               # established team: cross-team match forbidden
             c += self.w_t
         if jersey is not None and t.jersey is not None:
             if jersey == t.jersey and (not team or not t.team or team == t.team):

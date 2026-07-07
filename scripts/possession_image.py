@@ -28,15 +28,21 @@ BOX_EXPAND = 0.20            # a held ball sits at the body edge; expand boxes a
 NEAR_FRAC = 0.5              # no containment: accept nearest box centre within this * box_h
 
 
-def _attribute(ball_xy, players) -> int | None:
+def _attribute(ball_xy, players, scores=None) -> int | None:
     """players: [(track_id, (x1,y1,x2,y2))]. Containment first (smallest box wins =
-    nearest player), else nearest box centre within NEAR_FRAC of its box height."""
+    nearest player), else nearest box centre within NEAR_FRAC of its box height.
+    scores: optional {tid: p_has_ball} from the pose classifier — breaks containment
+    TIES (the dribbler-vs-adjacent-defender failure); single candidates unaffected."""
     bx, by = ball_xy
     containing = []
     for tid, (x1, y1, x2, y2) in players:
         ex, ey = (x2 - x1) * BOX_EXPAND, (y2 - y1) * BOX_EXPAND
         if x1 - ex <= bx <= x2 + ex and y1 - ey <= by <= y2 + ey:
             containing.append((abs((x2 - x1) * (y2 - y1)), tid))
+    if len(containing) >= 2 and scores:
+        scored = [(scores.get(tid), tid) for _, tid in containing if scores.get(tid) is not None]
+        if len(scored) >= 2:
+            return max(scored)[1]
     if containing:
         return min(containing)[1]
     best = None
@@ -69,6 +75,9 @@ def main() -> int:
                          "accepted peak (per frame of gap), else it needs --gate-k "
                          "consecutive agreeing frames to re-acquire — balls don't teleport")
     ap.add_argument("--gate-k", type=int, default=3)
+    ap.add_argument("--possession-model", default=None,
+                    help="ResNet-18 has-ball crop classifier (runs/possession/...): breaks "
+                         "multi-candidate attribution ties by holding POSE")
     ap.add_argument("--smooth", type=int, default=0,
                     help="holder-stream majority smoothing half-window in frames (0 = off). "
                          "Fast breaks churn the per-frame holder between nearby players; a "
@@ -95,6 +104,38 @@ def main() -> int:
     detector = None
     if not a.ball_json:
         detector = RFDETRDetector(a.weights, resolution=1280, threshold=a.threshold, model="small")
+
+    poss_model = poss_tf = None
+    if a.possession_model:
+        import torch
+        from PIL import Image
+        from torchvision import models
+        from torchvision import transforms as T
+        poss_model = models.resnet18()
+        poss_model.fc = torch.nn.Linear(poss_model.fc.in_features, 2)
+        poss_model.load_state_dict(torch.load(a.possession_model, map_location="cpu",
+                                              weights_only=True))
+        poss_model.eval()
+        poss_tf = T.Compose([T.Resize((160, 96)), T.ToTensor(),
+                             T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+
+        def _score_crops(img, cands):
+            """cands: [(tid, box)] -> {tid: p_has_ball} (classes: 0 no_ball, 1 has_ball)"""
+            ih, iw = img.shape[:2]
+            tids, batch = [], []
+            for tid, (x1, y1, x2, y2) in cands:
+                x1, y1 = max(0, int(x1)), max(0, int(y1))
+                x2, y2 = min(iw, int(x2)), min(ih, int(y2))
+                if x2 - x1 < 15 or y2 - y1 < 30:
+                    continue
+                crop = Image.fromarray(img[y1:y2, x1:x2, ::-1])
+                tids.append(tid)
+                batch.append(poss_tf(crop))
+            if not batch:
+                return {}
+            with torch.no_grad():
+                pr = torch.softmax(poss_model(torch.stack(batch)), dim=1)[:, 1]
+            return dict(zip(tids, pr.tolist()))
     ref_clip = Path(a.clip_dir) / f"{a.game}_{a.ref}{a.suffix}.mp4"
     votes: dict[int, list] = defaultdict(list)      # ref_frame -> [(ball_score, cam, lid)]
     for ang in a.cams.split(","):
@@ -146,8 +187,26 @@ def main() -> int:
                     pending = []
                 else:
                     n_gated += 1
+            scores_by_f: dict[int, dict] = {}
+            if poss_model is not None and accepted:
+                want = {fi: (bx, by) for fi, bx, by, _ in accepted}
+                n_ties = 0
+                for fi, img in enumerate(iter_video_frames(str(clip))):
+                    if fi not in want:
+                        continue
+                    bx, by = want[fi]
+                    cands = [(tid, box) for tid, box in players_by_f.get(fi, [])
+                             if box[0] - (box[2] - box[0]) * BOX_EXPAND <= bx
+                             <= box[2] + (box[2] - box[0]) * BOX_EXPAND
+                             and box[1] - (box[3] - box[1]) * BOX_EXPAND <= by
+                             <= box[3] + (box[3] - box[1]) * BOX_EXPAND]
+                    if len(cands) >= 2:                # only ties need the pose signal
+                        scores_by_f[fi] = _score_crops(img, cands)
+                        n_ties += 1
+                print(f"    {ang}: pose classifier consulted on {n_ties} tie frames",
+                      flush=True)
             for fi, bx, by, conf in accepted:
-                tid = _attribute((bx, by), players_by_f.get(fi, []))
+                tid = _attribute((bx, by), players_by_f.get(fi, []), scores_by_f.get(fi))
                 if tid is not None:
                     votes[fi - off].append((float(conf), ang, tid))
                     n_attr += 1
