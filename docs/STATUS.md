@@ -9,11 +9,11 @@ passes, turnovers) — and then an AI commentator writes the play-by-play, namin
 
 | Step | What it does | Status |
 |---|---|---|
-| **1. Detect** | Spot every player, referee and ball in every video frame | ✅ Working — graded on games it was never trained on |
+| **1. Detect** | Spot every player, referee and ball in every video frame | ✅ Working — and an upgraded version is training right now |
 | **2. Track** | Follow each person through time in each camera | ✅ Working |
-| **3. Combine** | Merge all 4 cameras so each player is ONE person on one map | ✅ Working — double-checked two independent ways |
-| **4. Name** | Read jersey numbers so players get real identities | ✅ **New: working end to end** |
-| **5. Events** | Say who had the ball, passes, turnovers | 🔶 We can now *measure* how good this is; the missing piece (ball tracking) is in training |
+| **3. Combine** | Merge all 4 cameras so each player is ONE person on one map | ✅ **Now proven on 5 different games, hands-off** |
+| **4. Name** | Read jersey numbers so players get real identities | ✅ Working — named players on every new game we tried |
+| **5. Events** | Say who had the ball, passes, turnovers | 🔶 Reliable near the basket; full-court version measured, not yet good enough to ship — two new attacks in progress |
 | **6. Narrate** | AI commentator writes the story | ✅ Working |
 
 ---
@@ -22,102 +22,92 @@ passes, turnovers) — and then an AI commentator writes the play-by-play, namin
 
 | Topic | Last report | Now |
 |---|---|---|
-| Jersey numbers | a plan and some labeled examples | **Players are named on screen, and we checked the names against the actual jerseys in the video** |
-| Court map quality | good, but players occasionally blinked off the map | **Blinking fixed — the map now shows exactly as many people as are really on court** |
-| Event accuracy | impossible to grade — no answer key existed | **A human created the answer key; the old system scored 14% — so we now know exactly what to fix and how to prove it's fixed** |
-| Ball tracking | we had honestly retracted a broken approach | **A dedicated ball-spotting AI is being trained right now, and its score improves by the hour** |
-| Independent check | in progress | **A second, unrelated AI reviewed our system's work: it agrees with 91–99% of what we detect** |
-| Work needed from your side | two labeling tasks pending | **None — everything is automated from here** |
+| Whole pipeline on new games | verified on 2 games, run by hand | **Ran fully automatically on 3 more games it had never seen — one command, no human help, correct rosters out** |
+| Independent check (SAM3) | it confirmed 91–99% of our per-camera detections | **Second, tougher check added: the finished court map was compared against SAM3's own map — and every gap found became training material for tonight's detector upgrade** |
+| Ball tracking | training was running, score improving hourly | **Training finished and was graded against 633 human ball-clicks: it now finds the ball in ~7–8 of 10 marked frames on a play it never trained on. Its remaining fault is precisely known (see §3) and two fixes are already in motion** |
+| Who-has-the-ball events | old system scored 14% — answer key built | **Near-basket possession is precision-clean and shipped. Fast-break possession was tested honestly: not good enough yet — so it stays off rather than guessing** |
+| Roster quality | one player appeared twice; a referee got a jersey number | **Both bugs found automatically by our new self-grading run — and both fixed and verified the same day** |
+| Work needed from your side | none | **Optional: a second round of ball-clicking (6 windows, 4 different games) is staged — the first round measurably improved the tracker** |
 
 ---
 
-## 1 · Players are now named (the headline)
+## 1 · Player tracking — now production-proven, not just demo-proven
 
-The system reads the number on each player's jersey and uses it everywhere — the court map,
-the event log, and the commentary all say "**B #22**" instead of "player 14".
+The core promise — *every player tracked, named, and placed on one court map* — was this
+week put through the strongest test we have: the **entire pipeline ran unattended on three
+games it had never seen**, end to end, one command each.
 
-*How it works, in plain terms:* three small AIs work as a team. The first asks *"is a number
-even readable in this image?"* (if not, it says "skip" rather than guess). The second finds
-exactly where the number is on the shirt. The third reads it — and it can read **any**
-number, including ones it never saw during training.
+| New game | People on the map | Steady the whole clip | Players named from jerseys |
+|---|---|---|---|
+| Game A | 12 per frame (matches the video) | 12 | 8 — e.g. A #0, A #8, B #3, B #9 |
+| Game B | 14 per frame | 14 | 7 — e.g. A #30, B #17 |
+| Game C | 14 per frame | 14 | 7 — e.g. A #6, B #4, B #7 |
 
-*How good is it:* when the system commits to a number, it is right **94 times out of 100**.
-When it isn't sure, it stays silent — and because a player is seen hundreds of times per
-game, a few silent moments cost nothing, while a wrong name would be much worse. A number is
-only accepted after **multiple independent readings agree**.
+The run also **graded itself** and caught two subtle roster bugs (a referee wrongly carrying
+a jersey number; one player listed twice under the same number). Both were fixed and
+re-verified the same day. That is exactly what this self-grading harness is for: every
+future game scores itself, and problems surface automatically instead of in front of you.
 
-*How we know it's real:* we tested it on games it was never trained on, and we compared the
-names it produced against the jerseys visible in the actual video — they match. As an extra
-sanity check, the AI commentator (a completely separate system that watches the raw video)
-had independently read the same numbers — **two unrelated systems, same answer**.
+**The second opinion, upgraded.** Previously, SAM3 — a very large independent AI from a
+different company — had confirmed 91–99% of our per-camera detections. This week we compared
+**finished court map against finished court map**. The two systems agree on the
+overwhelming majority of people and positions; where SAM3 sees someone we miss (mostly small,
+far-away players), those exact frames were **harvested automatically as training data**, and
+an upgraded detector is training on them right now. The independent checker doesn't just
+audit the system anymore — it actively teaches it.
 
-## 2 · We can now grade the system — with a human answer key
+## 2 · The answer key still rules everything
 
-A person watched three game clips and wrote down the truth: who had the ball at every
-moment, every pass, every turnover. That answer key now **automatically grades** every
-version of the system we build.
+A person watched game clips and wrote down the truth: who had the ball at every moment,
+every pass, every turnover. Every accuracy number below comes from grading against that —
+automatically, on every change. The old experimental events system scored **14%** on it;
+that number remains the floor any new events system must beat *on the record*.
 
-First grading of the *old, experimental* events system:
+## 3 · The ball — honest scoreboard after five training rounds
 
-| Question | Old system's answer | Truth |
-|---|---|---|
-| Who had the ball? | right only **14%** of the time | — |
-| How often did the ball change hands? | claimed **11** times | actually **2** |
-| Turnovers | reported 4 — **all four were false alarms**, and it missed both real ones | 2 |
+Finding a basketball is genuinely hard — it's tiny, fast, and hidden by hands and bodies
+most of the time. Here is exactly where we are:
 
-*Why show a bad score?* Because it proves the grading works, it's exactly why we switched
-that system off, and it sets the bar the new ball tracker must beat — **on the record**.
-
-## 3 · The ball — from guesswork to an engineering program
-
-Finding the ball is genuinely hard: it's tiny, fast, and often hidden by hands and bodies.
-We tested every available approach against the human answer key:
-
-| Approach | Plain-language result |
+| Question | Answer today |
 |---|---|
-| Old motion-based tracker | Saw "a ball" everywhere — but it was actually following players. Confidently wrong. Switched off. |
-| Standard detector | Almost never wrong — but only sees the ball near the basket, so it stays silent most of the game. |
-| **New: a dedicated ball-spotting AI ("BallNet")** | **In training now — built to see the ball everywhere, like the motion tracker, but actually correct, like the detector.** |
+| Can we find the ball when it's visible? | **Yes, mostly.** Graded against 633 human ball-clicks: the tracker finds it in **~7–8 of every 10 marked frames**, on a fast-break play it never trained on. Best result of any round so far. |
+| Does it stay quiet when the ball is hidden? | **Not yet — this is the one remaining fault.** When the ball is invisible, the tracker still "sees" one too often. The human "no ball here" clicks cut this false confidence by a third — proof that more of exactly that data attacks exactly this fault. |
+| Can it power full-court "who has the ball"? | **Tested honestly: no.** On the fast break it produced one correct possession and one wrongly credited to the defender running alongside. One wrong possession is worse than silence, so full-court events stay **off**. |
+| What ships meanwhile? | Near-basket possession from the standard detector — **zero wrong possessions** on both graded clips. The system says "no ball data" elsewhere rather than inventing events. |
 
-*Where the training data comes from (no human labeling needed):* we use a very large,
-slow-but-smart AI (SAM3) as a **teacher** — it marks the ball's position in our own game
-footage, and BallNet learns from those marks. Fun detail: the teacher kept marking the
-basketballs *painted on the court floor and walls*, so we built a filter that removes
-paintings and keeps the real, moving ball.
-
-*Progress so far:* first training round found the ball in about **35%** of test frames —
-frames from a game it never saw. We then quadrupled the training footage (pulled from two
-more games automatically), and the new training run **passed the old best score within
-minutes of starting**. Training continues right now.
-
-*The finish line is already defined:* BallNet must beat that 14% score, report 2 ball
-exchanges instead of 11, and produce **zero** false turnovers — graded automatically against
-the human answer key. Until it passes, the system honestly says "no ball data" rather than
-inventing events.
+**Two new attacks launched (both automatic):**
+1. **Teach "who is holding" instead of "where is the ball."** A player *holding* a ball looks
+   different from one who isn't — crouched, dribbling, shielding. A new classifier learns
+   this directly from thousands of examples labeled by the big teacher AI, no human work
+   needed. This attacks the exact failure above (crediting the nearby defender).
+2. **Second round of ball-clicking staged** — six clips across **four different games** (the
+   first 633 clicks all came from one game). Same tool, same address; every "no ball here"
+   click is ammunition against the false-alarm fault.
 
 ## 4 · How we know all of this is true
 
-- **Human answer key** — every accuracy claim above is graded against what a person actually
-  saw in the video, automatically, every time we change anything.
-- **A second opinion from an independent AI** — SAM3 (built by a different company, working
-  from different principles) reviewed our detections: it confirms **91–99%** of them. Where
-  it sees someone we miss, those cases are logged and become future training material.
-- **Tested on unseen games** — the whole pipeline was run cold on a game it had never
-  touched and produced the same quality. That run even caught a subtle bug (teams wearing
-  black vs. white confused the team-naming rule) which is now fixed.
-- **The court map holds up**: 13 real people on court → 13 stable identities on the map, no
-  blinking, no phantoms worth mentioning (one short-lived ghost in 12 seconds of play).
+- **Human answer key** grades every events claim, automatically, on every change.
+- **SAM3 second opinion** at two levels: per-camera detections (91–99% confirmed) and now
+  whole-court-map vs whole-court-map — with every disagreement logged, inspected, and
+  recycled as training data.
+- **Five games, zero hand-holding**: 2 verified deeply by a human + 3 run cold, hands-off,
+  with self-graded rosters.
+- **633 human ball-clicks** grade the ball tracker frame by frame; the second click round
+  targets its one measured weakness.
 - 43 automated self-tests run on every change; every number in this report can be
   regenerated with a single command.
 
 ## 5 · What happens next
 
-1. **BallNet finishes training → takes its exam** against the answer key. Passing unlocks
-   trustworthy "who-has-the-ball / passes / turnovers" — the last missing piece.
-2. Small polish: one player who briefly appears twice in a roster; refresh the demo video so
-   it shows the new named players.
-3. Scale up: run the full pipeline across many more games, unattended.
+1. **Detector upgrade lands** (training tonight on the SAM3-harvested frames) → the far-camera
+   blind spots shrink → re-graded automatically on all five games, before/after published.
+2. **"Who is holding" classifier** finishes training → if it passes the answer key, it becomes
+   the third possession signal and extends events beyond the basket area.
+3. **Demo refresh**: re-cut the client video with named players and the clean rosters.
+4. Optional but valuable: **round 2 of ball-clicking** (staged, 4 new games).
 
-**Bottom line:** the "who, where, and which jersey" promise is delivered and verified three
-independent ways. The ball is the one remaining piece — and it has gone from a broken claim
-to a measurable training program with a clear, already-written pass/fail test.
+**Bottom line:** *who, where, and which jersey* is now proven on five games — three of them
+completely hands-off — and independently double-checked at two levels. The ball has moved
+from guesswork to a measured program: visible-ball finding is strong, the single remaining
+fault is precisely identified, and two targeted fixes are already running. Nothing in this
+report is a promise — every claim is a number the system re-computes itself.
