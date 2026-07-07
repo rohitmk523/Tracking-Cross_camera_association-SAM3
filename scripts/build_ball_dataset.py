@@ -79,6 +79,8 @@ def main() -> int:
                     help="comma list of SUBSTRINGS: clips matching go to val (highest precedence) — hold out exam WINDOWS while training on the same game's other footage")
     ap.add_argument("--neg-ratio", type=float, default=0.5,
                     help="negatives per positive (ball-absent triplets)")
+    ap.add_argument("--gold-dir", default="data/gt_ball",
+                    help="operator ball clicks {frame:[x,y]|none|unclear} (original px); clicks override the teacher, none-frames become weighted TRUE negatives")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
     import cv2
@@ -96,12 +98,39 @@ def main() -> int:
         game = sp.stem.split("_")[0]
         n_games.add(game)
         frames_clean = _drop_static(d["frames"], d.get("n_frames", 400))
+        gold_p = Path(a.gold_dir) / f"{sp.stem.replace('.sam3', '')}.json"
+        gold = json.loads(gold_p.read_text()) if gold_p.exists() else {}
         wanted: dict[int, tuple] = {}
+        multis: dict[int, list] = {}
         for f_str, rows in frames_clean.items():
             good = [r for r in rows if r["score"] >= a.min_score]
-            if len(good) == 1:                      # unambiguous single ball only
+            if len(good) == 1:
                 b = good[0]["box"]
                 wanted[int(f_str)] = ((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
+            elif len(good) > 1:
+                multis[int(f_str)] = [((r["box"][0] + r["box"][2]) / 2,
+                                       (r["box"][1] + r["box"][3]) / 2) for r in good]
+        # temporal selection: resolve multi-candidate frames from neighbours (gold eval
+        # showed the teacher's candidates CONTAIN the ball 98-100% of the time; the old
+        # exactly-one-box rule threw those frames away)
+        n_resolved = 0
+        for _ in range(6):
+            changed = False
+            for f, cands in list(multis.items()):
+                anchor = wanted.get(f - 1) or wanted.get(f + 1)
+                if anchor is None:
+                    continue
+                d, best = min((((cx - anchor[0]) ** 2 + (cy - anchor[1]) ** 2) ** 0.5, (cx, cy))
+                              for cx, cy in cands)
+                if d <= 80:
+                    wanted[f] = best
+                    del multis[f]
+                    n_resolved += 1
+                    changed = True
+            if not changed:
+                break
+        if n_resolved:
+            print(f"    temporal selection recovered {n_resolved} multi-candidate frames")
         cap = cv2.VideoCapture(str(clip))
         frames = []
         while True:
@@ -119,11 +148,32 @@ def main() -> int:
         n_neg = int(len(wanted) * a.neg_ratio)
         neg = empty[::max(1, len(empty) // max(1, n_neg))][:n_neg]
         kept = 0
+        for dup in range(3):                      # gold TRUE negatives, weighted x3
+            for f in gold_negs:
+                if not (1 <= f < len(frames) - 1):
+                    continue
+                trip = cv2.hconcat([frames[f - 1], frames[f], frames[f + 1]])
+                name = f"{sp.stem.replace('.sam3', '')}_f{f:04d}_gneg{dup}.jpg"
+                cv2.imwrite(str(out / "images" / name), trip, [cv2.IMWRITE_JPEG_QUALITY, 88])
+                labels[name] = {"neg": True, "game": game, "split": _split(sp.stem, game, a)}
         for f in neg:
+            if f in gold:                            # teacher-absent but operator saw it?
+                continue                             # gold owns those frames now
             trip = cv2.hconcat([frames[f - 1], frames[f], frames[f + 1]])
             name = f"{sp.stem.replace('.sam3', '')}_f{f:04d}_neg.jpg"
             cv2.imwrite(str(out / "images" / name), trip, [cv2.IMWRITE_JPEG_QUALITY, 88])
             labels[name] = {"neg": True, "game": game, "split": _split(sp.stem, game, a)}
+        # gold overrides: clicks replace teacher labels; unclear frames are dropped
+        gold_negs = []
+        for f_str, v in gold.items():
+            f = int(f_str)
+            if isinstance(v, list):
+                wanted[f] = (v[0], v[1])
+            elif v == "none":
+                wanted.pop(f, None)
+                gold_negs.append(f)
+            else:
+                wanted.pop(f, None)                  # unclear: no supervision
         for f, (bx, by) in wanted.items():
             if not (1 <= f < len(frames) - 1):
                 continue
