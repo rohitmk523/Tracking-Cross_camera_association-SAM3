@@ -24,6 +24,13 @@ sources:
     priority: 0                     # authoritative; lower wins on duplicate frames
     class_map: {0: player, 1: referee, 2: ball}
 
+  - name: distill_pool              # SAM3-mined miss frames (scripts/mine_sam3_distill.py):
+    path: data/distill_pool         # far-cam people SAM3 sees and we don't; TRAIN games only
+    repo_relative: true             # (miner hard-refuses valid/test gids)
+    include: true
+    priority: 2                     # pseudo-labels always lose to human labels on duplicates
+    class_map: {0: player, 1: referee, 2: ball}
+
   - name: 4cam_detection            # legacy cross-game set: e6fba750 (train) + c2a354fe (test)
     path: "Uball 4Cam Detection/data"
     include: true

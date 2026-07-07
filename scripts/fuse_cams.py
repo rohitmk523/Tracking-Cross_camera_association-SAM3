@@ -150,11 +150,26 @@ def main() -> int:
                     r["jersey"][jersey] += 1
                 r["xy"].append([float(xy[0]), float(xy[1])])
             frames_out.append({"frame": f, "tracks": tr})
+        # aggregate jersey obeys the same rule as the live engine: a track whose
+        # FINAL team is REF must not surface number votes cast while it was mis-teamed
         players = [{"global_id": gid,
-                    "team": (r["team"].most_common(1)[0][0] if r["team"] else None),
-                    "jersey": (r["jersey"].most_common(1)[0][0] if r["jersey"] else None),
+                    "team": (team := (r["team"].most_common(1)[0][0] if r["team"] else None)),
+                    "jersey": (r["jersey"].most_common(1)[0][0]
+                               if r["jersey"] and team != "REF" else None),
                     "court_xy": [round(v, 1) for v in np.mean(r["xy"], axis=0)] if r["xy"] else None}
                    for gid, r in roster.items()]
+        # aggregate (team, number) uniqueness, mirroring the live engine's
+        # _enforce_unique: concurrent duplicates keep the number only on the gid
+        # with the most votes (the weaker one is a misread on a different person)
+        votes = {gid: (r["jersey"].most_common(1)[0][1] if r["jersey"] else 0)
+                 for gid, r in roster.items()}
+        best: dict[tuple, int] = {}
+        for pl in players:
+            k = (pl["team"], pl["jersey"])
+            if pl["jersey"] is not None and votes[pl["global_id"]] > votes.get(best.get(k), -1):
+                best[k] = pl["global_id"]
+        players = [pl if pl["jersey"] is None or best[(pl["team"], pl["jersey"])] == pl["global_id"]
+                   else {**pl, "jersey": None} for pl in players]
         ws = {"n_global_ids": len(players), "players": players, "frames": frames_out,
               "ref_angle": a.ref, "angles": list(cams), "fps": FPS}
         from uball_cc.fusion.tracklets import apply_merges, merge_map

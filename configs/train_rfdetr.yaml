@@ -9,7 +9,7 @@ early_stopping: true
 early_stopping_patience: 12
 class_names: [player, referee, ball]
 dataset: data/detect_consolidated      # built by scripts/build_detection_dataset.py
-run_name: rfdetr-s-1280-ourdata-v1
+run_name: rfdetr-s-1280-ourdata-v2-distill
 
 # SAHI (docs/04, the biggest far-endline lever). Two uses:
 #   - sliced FINE-TUNE: pre-slice the dataset into tiles (data prep, follow-up).
