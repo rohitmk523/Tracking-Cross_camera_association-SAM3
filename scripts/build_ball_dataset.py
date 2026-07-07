@@ -120,9 +120,9 @@ def main() -> int:
                 anchor = wanted.get(f - 1) or wanted.get(f + 1)
                 if anchor is None:
                     continue
-                d, best = min((((cx - anchor[0]) ** 2 + (cy - anchor[1]) ** 2) ** 0.5, (cx, cy))
-                              for cx, cy in cands)
-                if d <= 80:
+                dist, best = min((((cx - anchor[0]) ** 2 + (cy - anchor[1]) ** 2) ** 0.5,
+                                  (cx, cy)) for cx, cy in cands)
+                if dist <= 80:
                     wanted[f] = best
                     del multis[f]
                     n_resolved += 1
@@ -131,6 +131,18 @@ def main() -> int:
                 break
         if n_resolved:
             print(f"    temporal selection recovered {n_resolved} multi-candidate frames")
+        # gold overrides BEFORE negative sampling: clicks replace teacher labels,
+        # "none" frames become true negatives, unclear frames lose all supervision
+        gold_negs = []
+        for f_str, v in gold.items():
+            f = int(f_str)
+            if isinstance(v, list):
+                wanted[f] = (v[0], v[1])
+            elif v == "none":
+                wanted.pop(f, None)
+                gold_negs.append(f)
+            else:
+                wanted.pop(f, None)                  # unclear: no supervision
         cap = cv2.VideoCapture(str(clip))
         frames = []
         while True:
@@ -163,17 +175,6 @@ def main() -> int:
             name = f"{sp.stem.replace('.sam3', '')}_f{f:04d}_neg.jpg"
             cv2.imwrite(str(out / "images" / name), trip, [cv2.IMWRITE_JPEG_QUALITY, 88])
             labels[name] = {"neg": True, "game": game, "split": _split(sp.stem, game, a)}
-        # gold overrides: clicks replace teacher labels; unclear frames are dropped
-        gold_negs = []
-        for f_str, v in gold.items():
-            f = int(f_str)
-            if isinstance(v, list):
-                wanted[f] = (v[0], v[1])
-            elif v == "none":
-                wanted.pop(f, None)
-                gold_negs.append(f)
-            else:
-                wanted.pop(f, None)                  # unclear: no supervision
         for f, (bx, by) in wanted.items():
             if not (1 <= f < len(frames) - 1):
                 continue
