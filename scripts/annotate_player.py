@@ -24,13 +24,18 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+try:
+    from fastapi import Request                      # module-level: with `from __future__
+except ImportError:                                  # import annotations` FastAPI resolves
+    Request = None                                   # hints in MODULE globals, not locals
+
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 
 ANGLES = ("FL", "FR", "NL", "NR")
 TILE_W, TILE_H = 800, 450          # 2x2 -> 1600x900 canvas
 GREEN, YELLOW = (80, 200, 80), (0, 220, 255)
-MIN_SCORE = 0.35
+MIN_SCORE = 0.25
 
 
 def load_dets(game, tag):
@@ -79,7 +84,7 @@ class App:
         self.gt_path = REPO / f"data/gt_players/{a.game}_{a.tag}.json"
         self.gt_path.parent.mkdir(parents=True, exist_ok=True)
         self.gt = json.loads(self.gt_path.read_text()) if self.gt_path.exists() else {}
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
 
     def _grab(self, ang, f):
         fc = f + self.off[ang]
@@ -97,6 +102,13 @@ class App:
         return self.dets[ang].get(f + self.off[ang], [])
 
     def render(self, f, player):
+        # cv2.VideoCapture is NOT thread-safe (libavcodec async_lock assertion when
+        # rapid navigation fires concurrent requests) — serialize all decoding
+        with self.lock:
+            return self._render_locked(f, player)
+
+    def _render_locked(self, f, player):
+        f = f + self.first
         s = self.sel(player)["frames"].get(str(f), {})
         canvas = np.zeros((900, 1600, 3), np.uint8)
         for k, ang in enumerate(ANGLES):
@@ -116,6 +128,7 @@ class App:
         return buf.tobytes()
 
     def click(self, f, player, x, y):
+        f = f + self.first
         c, r = int(x // TILE_W), int(y // TILE_H)
         ang = ANGLES[r * 2 + c]
         img_x = (x - c * TILE_W) * 1920 / TILE_W
@@ -134,6 +147,7 @@ class App:
             self.save()
 
     def approve(self, f, player):
+        f = f + self.first
         with self.lock:
             s = self.sel(player)
             s["approved"][str(f)] = True
@@ -218,7 +232,7 @@ def main() -> int:
         players += [f"extra_{i}" for i in range(1, 4)] + ["ref_1", "ref_2", "ref_3"]
     current = {"player": players[0]}
 
-    from fastapi import FastAPI, Request
+    from fastapi import FastAPI
     from fastapi.responses import HTMLResponse, JSONResponse, Response
     import uvicorn
 
@@ -226,12 +240,12 @@ def main() -> int:
 
     @api.get("/")
     def index():
-        return HTMLResponse(PAGE)
+        return HTMLResponse(PAGE, headers={"Cache-Control": "no-store"})
 
     @api.get("/state")
     def state():
         approved = {p: len(app_state.gt.get(p, {}).get("approved", {})) for p in players}
-        return JSONResponse({"n": app_state.n, "first": app_state.first,
+        return JSONResponse({"n": app_state.n - app_state.first, "first": 0,
                              "players": players,
                              "player": current["player"], "approved": approved})
 
