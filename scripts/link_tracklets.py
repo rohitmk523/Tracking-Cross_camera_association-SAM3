@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -109,6 +109,13 @@ def main() -> int:
             if not (0 < gap <= a.max_gap):
                 continue
             if rows_by_id[j][0]["class_id"] != cls_i:
+                continue
+            # JERSEY VETO: fragments carrying different committed numbers are
+            # different people, whatever appearance says (same-kit teammates burned
+            # v2: wrong joins polluted number votes and named players dropped)
+            ji = Counter(r["jersey"] for r in rows_by_id[i] if r.get("jersey") is not None)
+            jj = Counter(r["jersey"] for r in rows_by_id[j] if r.get("jersey") is not None)
+            if ji and jj and ji.most_common(1)[0][0] != jj.most_common(1)[0][0]:
                 continue
             pred = pi + vi * min(gap, 30)            # extrapolate briefly, then trust radius
             dist = float(np.linalg.norm(pred - pj))
