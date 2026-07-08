@@ -56,6 +56,26 @@ def _l2(x: np.ndarray) -> np.ndarray:
     return x / (np.linalg.norm(x, axis=1, keepdims=True) + 1e-8)
 
 
+
+
+def _floor_hue(crop_bgr) -> float | None:
+    """Hue of the crop's bottom strip (floor + legs) — a per-crop, per-gym floor
+    estimate. Near cameras look steeply down, so the fixed torso window is often
+    floor-dominated (measured: every NR numbered track had torso hue ~= wood ~15);
+    suppressing this hue lets the JERSEY dominate the colour feature again."""
+    import cv2  # noqa: PLC0415
+
+    h = crop_bgr.shape[0]
+    strip = crop_bgr[int(h * 0.9):, :]
+    if strip.size == 0:
+        return None
+    hsv = cv2.cvtColor(strip, cv2.COLOR_BGR2HSV)
+    m = hsv[:, :, 1] > 40
+    if int(m.sum()) < 10:
+        return None
+    return float(np.median(hsv[:, :, 0][m]))
+
+
 def _torso_color_feat(crops: list[np.ndarray]) -> np.ndarray | None:
     """Saturation-weighted torso jersey-colour feature [S, V, S·cosH, S·sinH], averaged over a
     track's crops. Separates teams by JERSEY COLOUR directly (a bright/saturated team vs a dark/
@@ -64,6 +84,7 @@ def _torso_color_feat(crops: list[np.ndarray]) -> np.ndarray | None:
     import cv2  # noqa: PLC0415
 
     feats = []
+    sharp = []
     for c in crops:
         if c.size == 0:
             continue
@@ -71,10 +92,25 @@ def _torso_color_feat(crops: list[np.ndarray]) -> np.ndarray | None:
         torso = c[int(h * 0.15):int(h * 0.55), int(w * 0.25):int(w * 0.75)]
         if torso.size == 0:
             continue
+        sharp.append(cv2.Laplacian(cv2.cvtColor(torso, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var())
+        feats.append((torso, c))
+    if not feats:
+        return None
+    # motion blur smears jersey colour into the floor — keep the sharper half of the
+    # track's crops (roster-corruption audit: blurred crouch crops flipped clusters)
+    med = float(np.median(sharp))
+    kept = [f for f, s in zip(feats, sharp) if s >= med * 0.5] or feats
+    feats = []
+    for torso, full in kept:
         hsv = cv2.cvtColor(torso, cv2.COLOR_BGR2HSV).reshape(-1, 3).astype(float)
         hue = hsv[:, 0] * np.pi / 90.0                      # 0..180 -> 0..2pi
         s, v = hsv[:, 1] / 255.0, hsv[:, 2] / 255.0
         wgt = s + 0.05                                      # weight by saturation (ignore grey floor/skin)
+        fh = _floor_hue(full)
+        if fh is not None:                                  # suppress floor-coloured pixels
+            df = np.abs(hsv[:, 0] - fh)
+            df = np.minimum(df, 180.0 - df)
+            wgt = wgt * np.where(df < 12.0, 0.05, 1.0)
         feats.append([np.average(s, weights=wgt), np.average(v, weights=wgt),
                       np.average(s * np.cos(hue), weights=wgt), np.average(s * np.sin(hue), weights=wgt)])
     return np.mean(feats, axis=0) if feats else None
@@ -97,6 +133,10 @@ def _torso_hue(crops: list[np.ndarray]) -> float | None:
             continue
         hsv = cv2.cvtColor(torso, cv2.COLOR_BGR2HSV)
         m = hsv[:, :, 1] > 60
+        fh = _floor_hue(c)
+        if fh is not None:                                  # jersey signature, not the floor's
+            df = np.abs(hsv[:, :, 0].astype(float) - fh)
+            m = m & (np.minimum(df, 180.0 - df) >= 12.0)
         if int(m.sum()) > 10:
             hues.append(float(np.median(hsv[:, :, 0][m])))
     return float(np.median(hues)) if hues else None
@@ -170,8 +210,24 @@ def assign_teams(video_path: str | Path, tracks: list[Track], *,
         else:
             a_cluster = min(cl_hue, key=cl_hue.get)
             info["anchor"] = "hue"
-        team_of = {tid: ("A" if labels[i] == a_cluster else "B") for i, tid in enumerate(ids)}
-        info["team_counts"] = dict(Counter(team_of.values()))
+        # AMBIGUITY REFUSAL: a track sitting between the two centroids gets NO team
+        # (None = no vote in fusion; other cameras carry it). Wrong beats missing only
+        # in demos — in production a flipped team corrupts rosters and possession.
+        cents = {cl: x[labels == cl].mean(axis=0) for cl in (0, 1)}
+        team_of = {}
+        n_ambig = 0
+        for i, tid in enumerate(ids):
+            d0 = float(np.linalg.norm(x[i] - cents[0]))
+            d1 = float(np.linalg.norm(x[i] - cents[1]))
+            near, far = min(d0, d1), max(d0, d1)
+            if far > 0 and near / far > 0.75:
+                team_of[tid] = None
+                n_ambig += 1
+            else:
+                cl = 0 if d0 < d1 else 1
+                team_of[tid] = "A" if cl == a_cluster else "B"
+        info["ambiguous_tracks"] = n_ambig
+        info["team_counts"] = dict(Counter(v for v in team_of.values() if v))
     else:
         team_of = {tid: None for tid in ids}              # too few to cluster
 

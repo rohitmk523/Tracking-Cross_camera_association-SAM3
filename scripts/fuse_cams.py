@@ -112,6 +112,89 @@ def main() -> int:
         print(f"  {ang}: {kept}/{total} obs in-court, sync offset {off_f:+d} frames (peak {peak:.1f})")
 
     frames = sorted({f for sh in aligned.values() for f in sh})
+
+    # CROSS-CAMERA TEAM-ANCHOR RECONCILIATION (roster-corruption audit): each camera
+    # names its two colour clusters A/B independently, and near-threshold kits (teal vs
+    # green) make that anchor a per-camera coin flip — cameras then contradict each
+    # other and fusion builds chimera rosters. Colour cannot arbitrate across cameras
+    # (white balance drifts); GEOMETRY can: tracks from two cameras that project to the
+    # same court spot are the same person. For every non-ref TEAM_CAM, test identity vs
+    # flipped A/B against the reference team camera and keep whichever agrees more.
+    team_cams_present = [c for c in ("NR", "NL") if c in aligned]
+    if len(team_cams_present) == 2:
+        base, other = team_cams_present
+        same = flip = 0
+        # only MUTUAL nearest neighbours, close (<=80cm) and ISOLATED (second candidate
+        # >=180cm) count: opponents guarding each other are co-located too, and under a
+        # flipped anchor those pairs vote for the wrong answer.
+        for f, items in aligned[base].items():
+            cand2 = [(t2, xy2) for t2, xy2 in aligned[other].get(f, [])
+                     if t2.team in ("A", "B")]
+            if not cand2:
+                continue
+            for t1, xy1 in items:
+                if t1.team not in ("A", "B"):
+                    continue
+                ds = sorted((((xy1[0] - x) ** 2 + (xy1[1] - y) ** 2, k)
+                             for k, (t2, (x, y)) in enumerate(cand2)), key=lambda r: r[0])
+                if ds[0][0] > 80.0 ** 2 or (len(ds) > 1 and ds[1][0] < 180.0 ** 2):
+                    continue
+                t2 = cand2[ds[0][1]][0]
+                if t1.team == t2.team:
+                    same += 1
+                else:
+                    flip += 1
+        if flip > same:
+            fmap = {"A": "B", "B": "A"}
+            aligned[other] = {f: [(t.with_attrs(team=fmap.get(t.team, t.team)), xy)
+                                  for t, xy in items]
+                              for f, items in aligned[other].items()}
+            print(f"  team-anchor: {other} FLIPPED to match {base} "
+                  f"(agree {flip} vs {same} co-located pairs)")
+        else:
+            print(f"  team-anchor: {base}/{other} consistent "
+                  f"(agree {same} vs {flip} co-located pairs)")
+
+        # PER-TRACK REPAIR: after global alignment, a track whose mutual-isolated
+        # cross-camera matches consistently wear the OTHER letter is mislabelled by
+        # its own camera's clustering (e6 audit: NR put both kits in one cluster).
+        votes: dict[tuple, collections.Counter] = collections.defaultdict(collections.Counter)
+        for f, items in aligned[base].items():
+            cand2 = [(t2, xy2) for t2, xy2 in aligned[other].get(f, [])
+                     if t2.team in ("A", "B")]
+            if not cand2:
+                continue
+            for t1, xy1 in items:
+                if t1.team not in ("A", "B"):
+                    continue
+                ds = sorted((((xy1[0] - x) ** 2 + (xy1[1] - y) ** 2, k)
+                             for k, (t2, (x, y)) in enumerate(cand2)), key=lambda r: r[0])
+                if ds[0][0] > 80.0 ** 2 or (len(ds) > 1 and ds[1][0] < 180.0 ** 2):
+                    continue
+                t2 = cand2[ds[0][1]][0]
+                votes[(base, t1.track_id)][t2.team] += 1
+                votes[(other, t2.track_id)][t1.team] += 1
+        relabel: dict[tuple, str] = {}
+        for (cam, tid), c in votes.items():
+            top, n = c.most_common(1)[0]
+            if n >= 8 and n / sum(c.values()) >= 0.8:
+                relabel[(cam, tid)] = top
+        n_fixed = 0
+        for cam in (base, other):
+            fixed: dict[int, list] = {}
+            for f, items in aligned[cam].items():
+                row = []
+                for tr, xy in items:
+                    want = relabel.get((cam, tr.track_id))
+                    if want and tr.team in ("A", "B") and tr.team != want:
+                        tr = tr.with_attrs(team=want)
+                        n_fixed += 1
+                    row.append((tr, xy))
+                fixed[f] = row
+            aligned[cam] = fixed
+        if n_fixed:
+            print(f"  team-repair: {n_fixed} track-frames relabelled by cross-camera consensus")
+
     eng = FusionEngine(**engine_kw)
     per_frame_live: dict[int, list] = {}
     raw_by_frame: dict[int, list] = {}
