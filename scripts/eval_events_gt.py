@@ -78,16 +78,28 @@ def main() -> int:
 
     gt_h = _holder_by_frame(gt)
     dv_h = _derived_team_by_frame(events)
-    conf: Counter = Counter()
-    agree = n = 0
-    for f, g in gt_h.items():
-        d = dv_h.get(f, "loose")
-        conf[(g, d)] += 1
-        agree += (g == d)
-        n += 1
+    # LETTER CANONICALIZATION: A/B naming is an arbitrary per-run anchor (the operator
+    # annotated against one run's letters; the geometric anchor may legally swap them).
+    # Score both mappings and keep the better one — reported so it's never silent.
+    swap = {"A": "B", "B": "A"}
+    scores = {}
+    for name, m in (("identity", None), ("swapped", swap)):
+        conf: Counter = Counter()
+        agree = n = 0
+        for f, g in gt_h.items():
+            d = dv_h.get(f, "loose")
+            if m:
+                d = m.get(d, d)
+            conf[(g, d)] += 1
+            agree += (g == d)
+            n += 1
+        scores[name] = (agree, conf, n)
+    mapping = max(scores, key=lambda k: scores[k][0])
+    agree, conf, n = scores[mapping]
     moments = _match_moments(gt.get("moments", []), events, a.tol)
 
-    report = {"n_frames": n, "possession_frame_accuracy": round(agree / n, 3) if n else None,
+    report = {"n_frames": n, "team_letter_mapping": mapping,
+              "possession_frame_accuracy": round(agree / n, 3) if n else None,
               "possession_confusion_gt_vs_derived":
                   {f"{g}->{d}": c for (g, d), c in conf.most_common()},
               "moments": moments, "tolerance_frames": a.tol}
