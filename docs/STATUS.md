@@ -37,11 +37,24 @@ The core promise — *every player tracked, named, and placed on one court map* 
 week put through the strongest test we have: the **entire pipeline ran unattended on three
 games it had never seen**, end to end, one command each.
 
-| New game | People on the map | Steady the whole clip | Players named from jerseys |
-|---|---|---|---|
-| Game A | 12 per frame (matches the video) | 12 | 8 — e.g. A #0, A #8, B #3, B #9 |
-| Game B | 14 per frame | 14 | 7 — e.g. A #30, B #17 |
-| Game C | 14 per frame | 14 | 7 — e.g. A #6, B #4, B #7 |
+| New game | People on the map | Players named from jerseys |
+|---|---|---|
+| Game A | 12 per frame (matches the video) | 8 — e.g. A #0, A #8, B #3, B #9 |
+| Game B | 12 per frame | 7 — e.g. A #30, B #5 |
+| Game C | 13 per frame | 7 — A #5, #6, #9; B #3, #4, #5, #7 (**checked against the actual video frame by frame — every one correct**) |
+| Held-out test game | 13 per frame | 7 |
+
+**A hard bug found and beaten this week — by our own grading.** Re-running the pipeline
+fresh, the self-grading caught rosters coming out scrambled (players credited to the wrong
+team). We traced it to the floor: on the steep near cameras, the patch of image used to
+judge a player's shirt colour is mostly *court wood*, so the team-colour decision was
+sometimes a coin flip — and each camera could flip differently. Three fixes, all verified:
+the shirt-colour reader now ignores floor-coloured pixels (self-calibrating, any gym);
+blurred sprinting players no longer vote; and geometry arbitrates — two cameras seeing a
+player at the same court spot must agree on his team, so cameras now out-vote each other's
+mistakes. After the fix, the e6 roster was re-checked **against the actual video crops:
+every named player correct** — and the jersey reader turned out to be even better than
+reported (7 named players on that clip; we'd previously claimed 4).
 
 The run also **graded itself** and caught two subtle roster bugs (a referee wrongly carrying
 a jersey number; one player listed twice under the same number). Both were fixed and
