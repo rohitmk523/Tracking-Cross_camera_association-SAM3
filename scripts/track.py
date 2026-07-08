@@ -51,6 +51,15 @@ def main() -> int:
     ap.add_argument("--max-frames", type=int, default=None)
     ap.add_argument("--stride", type=int, default=1, help="video frame stride")
     ap.add_argument("--min-consecutive-frames", type=int, default=3)
+    ap.add_argument("--track-buffer", type=int, default=120,
+                    help="frames a lost track survives (v1 tuning: static cams + batch "
+                         "processing make long memory nearly free; was 30 — mid-court "
+                         "confidence dips killed tracks that were still there)")
+    ap.add_argument("--min-iou", type=float, default=0.1,
+                    help="association IoU floor (v1: fast motion + small far boxes)")
+    ap.add_argument("--gsi", type=int, default=20,
+                    help="fill track gaps up to N frames by linear interpolation "
+                         "(marked interp=true, score 0.3); 0 = off")
     ap.add_argument("--save-video", default=None, help="write an annotated mp4 (boxes+ids) here")
     ap.add_argument("--out-fps", type=float, default=30.0, help="fps for --save-video")
     ap.add_argument("--out", default=None)
@@ -77,7 +86,8 @@ def main() -> int:
         tracks = []
         for _, img, frame_tracks in track_stream(
                 detector, frames, a.cam,
-                minimum_consecutive_frames=a.min_consecutive_frames):
+                minimum_consecutive_frames=a.min_consecutive_frames,
+                lost_track_buffer=a.track_buffer, minimum_iou_threshold=a.min_iou):
             tracks.extend(frame_tracks)
             vis = render_frame(img, frame_tracks)
             if writer is None:
@@ -90,7 +100,13 @@ def main() -> int:
         print(f"annotated video -> {vid_out}")
     else:
         tracks = track_sequence(detector, frames, a.cam,
-                                minimum_consecutive_frames=a.min_consecutive_frames)
+                                minimum_consecutive_frames=a.min_consecutive_frames,
+                                lost_track_buffer=a.track_buffer,
+                                minimum_iou_threshold=a.min_iou)
+    if a.gsi:
+        from uball_cc.tracking.gsi import fill_gaps
+        tracks, n_fill = fill_gaps(tracks, max_gap=a.gsi)
+        print(f"GSI: {n_fill} interpolated rows (gaps <= {a.gsi} frames)")
     stats = summarize(tracks)
     print(f"cam={a.cam} detector={a.detector} source={source}")
     for k, v in stats.items():
