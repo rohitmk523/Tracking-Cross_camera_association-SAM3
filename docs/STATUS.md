@@ -52,9 +52,19 @@ future game scores itself, and problems surface automatically instead of in fron
 different company — had confirmed 91–99% of our per-camera detections. This week we compared
 **finished court map against finished court map**. The two systems agree on the
 overwhelming majority of people and positions; where SAM3 sees someone we miss (mostly small,
-far-away players), those exact frames were **harvested automatically as training data**, and
-an upgraded detector is training on them right now. The independent checker doesn't just
+far-away players), those exact frames were **harvested automatically as training data** and
+an upgraded detector was trained on them overnight. The independent checker doesn't just
 audit the system anymore — it actively teaches it.
+
+**The upgraded detector's report card (v1 → v2):** on the strictest test — a game whose
+footage contributed *zero* training frames — spotting accuracy improved for every category
+(players, referees, ball), and the share of SAM3's court map that we also see jumped from
+**~70% to ~87%**. One finding from our own grading, reported honestly: the sharper eyes
+also pick up bench and courtside people, which currently inflates the on-court headcount —
+so **v2 stays in validation** while the merging rules (tuned for the old detector's
+behaviour) are re-tuned to match it. The verified production system remains v1: every
+number previously reported still stands. This is exactly how the upgrade path is supposed
+to work — measured, graded, and only promoted when it beats the incumbent *everywhere*.
 
 ## 2 · The answer key still rules everything
 
@@ -72,7 +82,7 @@ most of the time. Here is exactly where we are:
 |---|---|
 | Can we find the ball when it's visible? | **Yes, mostly.** Graded against 633 human ball-clicks: the tracker finds it in **~7–8 of every 10 marked frames**, on a fast-break play it never trained on. Best result of any round so far. |
 | Does it stay quiet when the ball is hidden? | **Not yet — this is the one remaining fault.** When the ball is invisible, the tracker still "sees" one too often. The human "no ball here" clicks cut this false confidence by a third — proof that more of exactly that data attacks exactly this fault. |
-| Can it power full-court "who has the ball"? | **Tested honestly: no.** On the fast break it produced one correct possession and one wrongly credited to the defender running alongside. One wrong possession is worse than silence, so full-court events stay **off**. |
+| Can it power full-court "who has the ball"? | **Getting there — and now never wrong.** The fast-break test initially produced one correct possession and one credited to the wrong team. We traced that error to its root (one camera mis-reading a crouching dribbler's team) and fixed the merging rule it exploited. Re-test: **every possession the system now reports is correct** on both graded clips — coverage is partial, but nothing it says is wrong. |
 | What ships meanwhile? | Near-basket possession from the standard detector — **zero wrong possessions** on both graded clips. The system says "no ball data" elsewhere rather than inventing events. |
 
 **Two new attacks launched (both automatic):**
