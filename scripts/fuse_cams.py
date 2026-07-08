@@ -24,7 +24,7 @@ PAD = 300.0                                   # cm tolerance outside court for k
 TEAM_COLOR = {"A": (0, 140, 255), "B": (255, 120, 40), "REF": (0, 255, 255), None: (160, 160, 160)}
 
 
-def _load_cam(tracks_json, calib_json, region_pad=800.0):
+def _load_cam(tracks_json, calib_json, region_pad=800.0, court_pad=None):
     from uball_cc.fusion.court import LENGTH, WIDTH
     from uball_cc.fusion.homography import calib_hull, in_calib_region, load_calib, project_pixels
     from uball_cc.tracking import Track
@@ -36,7 +36,8 @@ def _load_cam(tracks_json, calib_json, region_pad=800.0):
     per_frame: dict[int, list] = collections.defaultdict(list)
     kept = 0
     for t, c in zip(tracks, court):
-        in_court = -PAD <= c[0] <= LENGTH + PAD and -PAD <= c[1] <= WIDTH + PAD
+        pad = PAD if court_pad is None else court_pad
+        in_court = -pad <= c[0] <= LENGTH + pad and -pad <= c[1] <= WIDTH + pad
         if in_court and in_calib_region(c, hull, region_pad):   # gate to calibrated region
             per_frame[t.frame].append((t, (float(c[0]), float(c[1]))))
             kept += 1
@@ -66,6 +67,10 @@ def main() -> int:
     ap.add_argument("--w-a", type=float, default=TUNED["w_a"], help="ReID weight in association cost")
     ap.add_argument("--w-d", type=float, default=1.0, help="court-distance weight")
     ap.add_argument("--cluster-dist", type=float, default=TUNED["cluster_dist"], help="cross-camera grouping tolerance (cm)")
+    ap.add_argument("--court-pad", type=float, default=PAD,
+                    help="cm tolerance outside the court rectangle; benches sit ~2m+ off "
+                         "the sideline — the stronger v2 detector sees them, so this is "
+                         "the inventory-containment knob")
     ap.add_argument("--region-pad", type=float, default=800.0,
                     help="cm tolerance outside a camera's calibrated hull before its obs are dropped")
     ap.add_argument("--emit-coast", type=int, default=12,
@@ -91,7 +96,8 @@ def main() -> int:
     aligned: dict[str, dict[int, list]] = {}
     reid_maps: dict[str, dict] = {}
     for ang, c in cams.items():
-        per_frame, kept, total, reid_by_id = _load_cam(c["tracks"], c["calib"], a.region_pad)
+        per_frame, kept, total, reid_by_id = _load_cam(c["tracks"], c["calib"], a.region_pad,
+                                                        a.court_pad)
         reid_maps[ang] = reid_by_id
         if ang == a.ref or a.no_audio_sync:
             off_f, peak = 0, 0.0

@@ -138,12 +138,14 @@ class FusionEngine:
                  gate_cost: float = 6.0, lost_buffer: int = 45, reentry_frames: int = 150,
                  reentry_dist: float = 350.0, merge_dist: float = 120.0, cluster_dist: float = 250.0,
                  min_hits: int = 3, jersey_min_votes: int = 3, attr_decay: float = 0.98,
-                 reentry_min_score: float = 0.55, emit_coast: int = 0):
+                 reentry_min_score: float = 0.55, emit_coast: int = 0,
+                 solo_spawn_clear: float = 150.0):
         self.dt, self.w_d, self.w_a, self.w_t, self.w_j = dt, w_d, w_a, w_t, w_j
         self.max_assoc_dist, self.gate_cost = max_assoc_dist, gate_cost
         self.lost_buffer, self.reentry_frames = lost_buffer, reentry_frames
         self.reentry_dist, self.merge_dist, self.cluster_dist = reentry_dist, merge_dist, cluster_dist
         self.min_hits, self.jersey_min_votes = min_hits, jersey_min_votes
+        self.solo_spawn_clear = solo_spawn_clear
         self.attr_decay, self.reentry_min_score = attr_decay, reentry_min_score
         self.emit_coast = emit_coast
         self.tracks: list[GlobalTrack] = []
@@ -192,13 +194,23 @@ class FusionEngine:
                     taken.add(i)
             leftover = [i for i in range(len(groups)) if i not in taken]
 
-        # 3. leftover groups -> re-entry or a new global track
+        # 3. leftover groups -> re-entry or a new global track. A SINGLE-camera group
+        # may only spawn a new identity in open space: when one camera's observation is
+        # split off (team misread, marginal box) next to an already-tracked player, the
+        # splinter must die here, not become a courtside doppelganger (v2-detector
+        # audit: most duplicate pairs were 1-cam tracks on top of multi-cam tracks).
         for i in leftover:
-            if self._try_reentry(groups[i], frame) is None:
-                t = GlobalTrack(self._next_id, dt=self.dt, jersey_min_votes=self.jersey_min_votes,
-                                attr_decay=self.attr_decay).init(groups[i], frame)
-                self._next_id += 1
-                self.tracks.append(t)
+            if self._try_reentry(groups[i], frame) is not None:
+                continue
+            g = groups[i]
+            if len(g) == 1 and any(
+                    float(np.linalg.norm(np.asarray(g[0].court_xy) - t.pos)) < self.solo_spawn_clear
+                    for t in self.tracks):
+                continue
+            t = GlobalTrack(self._next_id, dt=self.dt, jersey_min_votes=self.jersey_min_votes,
+                            attr_decay=self.attr_decay).init(g, frame)
+            self._next_id += 1
+            self.tracks.append(t)
 
         self._retire(frame)
         self._enforce_unique()

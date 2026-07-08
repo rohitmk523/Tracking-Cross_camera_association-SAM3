@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0 PYTORCH_MPS_LOW_WATERMARK_RATIO=0.0
 GID=$1; START=$2; DUR=${3:-14}
 TAG=${START}_${DUR}
-W=runs/rfdetr-s-1280-ourdata-v1/best.pth
+W=${UBALL_WEIGHTS:-runs/rfdetr-s-1280-ourdata-v1/best.pth}
 REID_W=$(python -c "from uball_cc.tracking.reid import default_reid_weights; print(default_reid_weights())")
 
 echo "== [$GID $TAG] pull =="
