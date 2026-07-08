@@ -76,10 +76,15 @@ def main() -> int:
 
     detector = _load_detector(a)
     cached = None
-    if a.dets_cache != "off" and a.out:
+    if a.dets_cache != "off":
         from uball_cc.detection.base import CachedDetector
-        cpath = (Path(a.out).with_suffix(".dets.npz") if a.dets_cache == "auto"
-                 else Path(a.dets_cache))
+        if a.dets_cache == "auto":
+            # key on the VIDEO (same clip -> same cache, whatever the --out), plus
+            # detector settings that change raw detections
+            src_name = Path(a.video or a.frames).stem
+            cpath = Path("runs/dets_cache") / f"{src_name}_{a.model}_{a.resolution}_t{a.threshold}.dets.npz"
+        else:
+            cpath = Path(a.dets_cache)
         detector = cached = CachedDetector(detector, cpath)
     if a.video:
         frames = iter_video_frames(a.video, max_frames=a.max_frames, stride=a.stride)
