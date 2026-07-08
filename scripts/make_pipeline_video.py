@@ -90,7 +90,7 @@ def grid_segment(vw, caps, tracks_by, mode, n, stage, title, sub):
         vw.write(canvas)
 
 
-def fuse_segment(vw, caps, tracks_by, ws_frames):
+def fuse_segment(vw, caps, tracks_by, ws_frames, roster=None):
     base, to_px = draw_court(scale=0.40, margin=26)
     hb, wb = base.shape[:2]                      # horizontal court: wb x hb
     vcourt_base = np.rot90(base).copy()          # CCW: court's RIGHT side -> TOP
@@ -104,6 +104,8 @@ def fuse_segment(vw, caps, tracks_by, ws_frames):
     gy0 = 74 + (H - 74 - 720) // 2
     cx0 = 1280 + (640 - vw_) // 2
     cy0 = 74 + (H - 74 - vh) // 2
+    smoothed: dict[int, tuple] = {}                      # gid -> EMA court position
+    ALPHA = 0.35                                         # display smoothing only
     for f in range(N_FUSE):
         tracks = ws_frames.get(f, [])
         gmap = {}
@@ -121,8 +123,10 @@ def fuse_segment(vw, caps, tracks_by, ws_frames):
                 hit = gmap.get((ang, t["track_id"]))
                 if hit:
                     gid, team = hit
+                    num = (roster or {}).get(gid)
+                    lbl = f"{team or ''}#{num}" if num is not None else f"G{gid}"
                     label_box(img, x1, y1, x2, y2, TEAM.get(team, (170, 170, 170)),
-                              f"G{gid}", 2.4, 6, 6)
+                              lbl, 2.4, 6, 6)
                 else:
                     cv2.rectangle(img, (x1, y1), (x2, y2), (105, 105, 105), 2)
             tile = cv2.resize(img, (640, 360))
@@ -134,13 +138,21 @@ def fuse_segment(vw, caps, tracks_by, ws_frames):
         court = vcourt_base.copy()                             # RIGHT: vertical court
         for t in tracks:
             col = TEAM.get(t.get("team"), (170, 170, 170))
-            p = vpx(t["court_xy"])
+            gid = t["global_id"]
+            raw_xy = t["court_xy"]
+            if gid in smoothed:                                # EMA: calm display jitter
+                sx, sy = smoothed[gid]
+                raw_xy = (sx + ALPHA * (raw_xy[0] - sx), sy + ALPHA * (raw_xy[1] - sy))
+            smoothed[gid] = tuple(raw_xy)
+            p = vpx(raw_xy)
             if t.get("coasting"):
                 cv2.circle(court, p, 13, col, 3)               # hollow = briefly unseen
             else:
                 cv2.circle(court, p, 13, col, -1)
                 cv2.circle(court, p, 13, (0, 0, 0), 1)
-            cv2.putText(court, str(t["global_id"]), (p[0] + 15, p[1] + 7), FONT, 0.85,
+            num = (roster or {}).get(t["global_id"])
+            tag = f"#{num}" if num is not None else str(t["global_id"])
+            cv2.putText(court, tag, (p[0] + 15, p[1] + 7), FONT, 0.85,
                         col, 2, cv2.LINE_AA)
         canvas[cy0:cy0 + vh, cx0:cx0 + vw_] = court
         cv2.putText(canvas, "RIGHT end", (cx0 + 8, cy0 + 24), FONT, 0.6, (160, 160, 160), 1, cv2.LINE_AA)
@@ -238,7 +250,9 @@ def main():
                  "TRACK - follow each person per camera (each camera numbers on its OWN)",
                  "A7 here and A7 there are NOT the same player yet - fusion solves that")
     caps = fresh_caps()
-    fuse_segment(vw, caps, tracks_by, ws_frames)
+    roster = {pl["global_id"]: pl["jersey"] for pl in ws["players"]
+              if pl.get("jersey") is not None}
+    fuse_segment(vw, caps, tracks_by, ws_frames, roster)
     text_segment(vw, events, narration)
     vw.release()
     print(f"raw -> {OUT}")

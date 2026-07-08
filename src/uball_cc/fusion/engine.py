@@ -60,6 +60,7 @@ class GlobalTrack:
     _team: Counter = field(default_factory=Counter)
     _jersey: Counter = field(default_factory=Counter)
     _reid_sum: np.ndarray | None = None
+    recent_cams: dict = field(default_factory=dict)   # cam -> (frame, local_id), for dup-merge veto
     _reid: np.ndarray | None = None
 
     def init(self, obs_list: list[Observation], frame: int) -> "GlobalTrack":
@@ -115,16 +116,18 @@ class GlobalTrack:
                 if c[k] < 0.01:
                     del c[k]
         for o in obs_list:
-            if o.team:
-                self._team[o.team] += 1
+            if o.team:                                  # confident-region votes count more
+                self._team[o.team] += o.zone_conf
             if o.jersey is not None:
-                self._jersey[o.jersey] += 1
+                self._jersey[o.jersey] += o.zone_conf
             if o.reid is not None:
                 v = np.asarray(o.reid, float)
                 v = v / (np.linalg.norm(v) + 1e-8)
                 self._reid_sum = v if self._reid_sum is None else self._reid_sum + v
                 self._reid = self._reid_sum / (np.linalg.norm(self._reid_sum) + 1e-8)
         self.members = {o.cam: o.local_track_id for o in obs_list}
+        for o in obs_list:
+            self.recent_cams[o.cam] = (frame, o.local_track_id)
         self.hits += 1
         self.time_since_update = 0
         self.last_frame = frame
@@ -151,6 +154,8 @@ class FusionEngine:
         self.tracks: list[GlobalTrack] = []
         self.lost: list[GlobalTrack] = []
         self._next_id = 1
+        self._prox: dict[tuple, int] = {}
+        self.merged: dict[int, int] = {}            # junior gid -> elder gid (alias map)
 
     # --- association cost (gated); on a point+attrs so groups & observations share it ---
     def _cost_xy(self, xy, team, jersey, reid, t: GlobalTrack) -> float:
@@ -213,6 +218,7 @@ class FusionEngine:
             self.tracks.append(t)
 
         self._retire(frame)
+        self._merge_duplicates(frame)
         self._enforce_unique()
         # emit_coast > 0 also returns briefly-unseen tracks (Kalman prediction, up to
         # emit_coast frames): 91% of measured dropout gaps were 1-5 frame detection
@@ -231,7 +237,14 @@ class FusionEngine:
                     continue
                 s = self._summarize(g)
                 if o.team and s["team"] and o.team != s["team"]:
-                    continue
+                    if "REF" in (o.team, s["team"]):
+                        # class flips (player<->referee) are detector noise, not proof of
+                        # two people: allow the join, but only at close range
+                        d0 = float(np.linalg.norm(np.array(o.court_xy) - s["xy"]))
+                        if d0 > 80.0:               # absolute: same-person projection noise,
+                            continue                # NOT a fraction of cluster_dist (600cm!)
+                    else:
+                        continue                    # A vs B colour conflict: hard split
                 if o.jersey is not None and s["jersey"] is not None and o.jersey != s["jersey"]:
                     continue                                # different confirmed numbers: not one player
                 d = float(np.linalg.norm(np.array(o.court_xy) - s["xy"]))
@@ -248,7 +261,8 @@ class FusionEngine:
         teams = Counter(o.team for o in g if o.team)
         jers = Counter(o.jersey for o in g if o.jersey is not None)
         reids = [np.asarray(o.reid, float) for o in g if o.reid is not None]
-        return {"xy": np.mean([o.court_xy for o in g], axis=0),
+        wz = np.array([max(o.zone_conf * o.score, 1e-3) for o in g])
+        return {"xy": np.average([o.court_xy for o in g], axis=0, weights=wz),
                 "team": teams.most_common(1)[0][0] if teams else None,
                 "jersey": jers.most_common(1)[0][0] if jers else None,
                 "reid": np.mean(reids, axis=0) if reids else None}
@@ -296,6 +310,60 @@ class FusionEngine:
                 keep.append(t)
         self.tracks = keep
         self.lost = [t for t in self.lost if frame - t.last_frame <= self.reentry_frames]
+
+    def _merge_duplicates(self, frame: int) -> None:
+        """Two live tracks that shadow each other are usually ONE person split by an
+        attribute conflict (player<->referee class flip, team misread). Merge after
+        sustained proximity — UNLESS the world proves they are two people:
+        (a) any single camera saw them as two distinct boxes recently,
+        (b) different committed jersey numbers,
+        (c) clearly different appearance (ReID cosine < 0.55)."""
+        ids = {t.id: t for t in self.tracks}
+        for a in self.tracks:
+            for b in self.tracks:
+                if a.id >= b.id or a.id not in ids or b.id not in ids:
+                    continue
+                d = float(np.linalg.norm(a.pos - b.pos))
+                key = (a.id, b.id)
+                if d > 0.66 * self.merge_dist:
+                    self._prox.pop(key, None)
+                    continue
+                n_prox, n_both = self._prox.get(key, (0, 0))
+                both_now = a.time_since_update == 0 and b.time_since_update == 0
+                self._prox[key] = (n_prox + 1, n_both + (1 if both_now else 0))
+                if n_prox + 1 < 25:
+                    continue
+                # CONCURRENCY VETO: both tracks fed by their own observations most
+                # frames = two real people close together (guarding), not a splinter
+                if (n_both + (1 if both_now else 0)) / (n_prox + 1) > 0.3:
+                    continue
+                # vetoes: evidence of TWO real people
+                two = False
+                for cam, (fa, la) in a.recent_cams.items():
+                    hb = b.recent_cams.get(cam)
+                    if hb and frame - fa <= 12 and frame - hb[0] <= 12 and la != hb[1]:
+                        two = True
+                        break
+                if two:
+                    continue
+                if a.jersey is not None and b.jersey is not None and a.jersey != b.jersey:
+                    continue
+                if a.reid is not None and b.reid is not None and _cos(a.reid, b.reid) < 0.55:
+                    continue
+                elder, junior = (a, b) if a.hits >= b.hits else (b, a)
+                elder._team.update(junior._team)
+                elder._jersey.update(junior._jersey)
+                if junior._reid_sum is not None:
+                    elder._reid_sum = junior._reid_sum if elder._reid_sum is None                         else elder._reid_sum + junior._reid_sum
+                    elder._reid = elder._reid_sum / (np.linalg.norm(elder._reid_sum) + 1e-8)
+                elder.hits += junior.hits
+                for cam, hit in junior.recent_cams.items():
+                    if cam not in elder.recent_cams or hit[0] > elder.recent_cams[cam][0]:
+                        elder.recent_cams[cam] = hit
+                self.merged[junior.id] = elder.id
+                self.tracks = [x for x in self.tracks if x.id != junior.id]
+                ids.pop(junior.id, None)
+                self._prox.pop(key, None)
 
     def _enforce_unique(self) -> None:
         """At most one live track per committed (team, number). The weaker claimant KEEPS

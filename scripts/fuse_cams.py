@@ -204,18 +204,46 @@ def main() -> int:
         for ang, sh in aligned.items():
             zc = zone.get(ang, 1.0)
             for t, xy in sh.get(f, []):
-                # A/B needs colour separation -> near cams only. REF is a DETECTOR-class
-                # fact (majority-voted per track), trustworthy from any camera.
-                team = t.team if (ang in TEAM_CAMS or t.team == "REF") else None
-                jersey = t.jersey if (ang in JERSEY_CAMS and t.team != "REF") else None
+                # REGION-OF-CONFIDENCE (operator observation: a near camera is excellent
+                # on its own half and guesses beyond the half-line): box height IS
+                # distance — a tall box is close and owns the call, a tiny far-half box
+                # barely votes on position and not at all on colour/class/number.
+                bh = float(t.box_xyxy[3] - t.box_xyxy[1])
+                pos_conf = zc * min(max(bh / 260.0, 0.35), 1.3)
+                # A/B needs colour separation -> near cams AND a readable crop. REF is a
+                # DETECTOR-class fact from any camera, but not from a 100px speck whose
+                # class flips (mis-coloured "referees" on the opposite half).
+                team = None
+                if t.team == "REF":
+                    team = "REF" if bh >= 100.0 else None
+                elif ang in TEAM_CAMS and bh >= 120.0:
+                    team = t.team
+                jersey = t.jersey if (ang in JERSEY_CAMS and t.team != "REF"
+                                      and bh >= 120.0) else None
                 obs.append(Observation(ang, t.track_id, xy, team=team, jersey=jersey,
                                        reid=reid_maps[ang].get(t.track_id),
-                                       score=t.score, zone_conf=zc))
+                                       score=t.score, zone_conf=pos_conf))
                 raw.append((xy, t.team))
         live = eng.step(f, obs)
         per_frame_live[f] = [(t.id, tuple(t.pos), t.team, t.jersey, dict(t.members),
                               t.time_since_update > 0) for t in live]
         raw_by_frame[f] = raw
+
+    # apply live duplicate-merge aliases retroactively (frames recorded before the
+    # merge point still carry the junior gid)
+    def _resolve(g):
+        seen = set()
+        while g in eng.merged and g not in seen:
+            seen.add(g)
+            g = eng.merged[g]
+        return g
+    if eng.merged:
+        per_frame_live = {f: [(_resolve(gid), *rest) for gid, *rest in v]
+                          for f, v in per_frame_live.items()}
+        # a frame may now contain the same gid twice (junior+elder both emitted pre-merge)
+        per_frame_live = {f: list({gid: (gid, *rest) for gid, *rest in v}.values())
+                          for f, v in per_frame_live.items()}
+        print(f"  duplicate-merge: {len(eng.merged)} identities folded live")
 
     n_ids = len({gid for v in per_frame_live.values() for gid, *_ in v})
     print(f"fused {len(frames)} frames -> {n_ids} distinct global ids "
