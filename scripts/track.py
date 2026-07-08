@@ -57,6 +57,10 @@ def main() -> int:
                          "confidence dips killed tracks that were still there)")
     ap.add_argument("--min-iou", type=float, default=0.1,
                     help="association IoU floor (v1: fast motion + small far boxes)")
+    ap.add_argument("--dets-cache", default="auto",
+                    help="npz detection cache path; 'auto' = alongside --out; 'off' to disable. "
+                         "Detection is ~85%% of wall time and identical across tracking "
+                         "iterations — cached, association re-runs take seconds")
     ap.add_argument("--gsi", type=int, default=20,
                     help="fill track gaps up to N frames by linear interpolation "
                          "(marked interp=true, score 0.3); 0 = off")
@@ -71,6 +75,12 @@ def main() -> int:
     )
 
     detector = _load_detector(a)
+    cached = None
+    if a.dets_cache != "off" and a.out:
+        from uball_cc.detection.base import CachedDetector
+        cpath = (Path(a.out).with_suffix(".dets.npz") if a.dets_cache == "auto"
+                 else Path(a.dets_cache))
+        detector = cached = CachedDetector(detector, cpath)
     if a.video:
         frames = iter_video_frames(a.video, max_frames=a.max_frames, stride=a.stride)
         source = a.video
@@ -103,6 +113,8 @@ def main() -> int:
                                 minimum_consecutive_frames=a.min_consecutive_frames,
                                 lost_track_buffer=a.track_buffer,
                                 minimum_iou_threshold=a.min_iou)
+    if cached is not None:
+        cached.flush()
     if a.gsi:
         from uball_cc.tracking.gsi import fill_gaps
         tracks, n_fill = fill_gaps(tracks, max_gap=a.gsi)

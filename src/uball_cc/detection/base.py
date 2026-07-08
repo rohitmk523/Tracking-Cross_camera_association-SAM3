@@ -73,3 +73,57 @@ class RFDETRDetector:
             out.append(Detection((x1, y1, x2, y2), float(d.confidence[i]),
                                  int(d.class_id[i])))
         return out
+
+class CachedDetector:
+    """Wraps any Detector with an npz on-disk cache keyed by frame index.
+
+    Detection is ~85% of pipeline wall time and is IDENTICAL across tracking /
+    fusion iterations — cache once per clip, then association experiments re-run
+    in seconds. Cache format: boxes (N,4) float32, scores (N,), classes (N,),
+    frame_idx (N,) int32.
+    """
+
+    def __init__(self, inner, cache_path):
+        import numpy as np
+        from pathlib import Path as _P
+        self._inner = inner
+        self._path = _P(cache_path)
+        self._cache: dict[int, list[Detection]] = {}
+        self._next_frame = 0
+        self._dirty = False
+        if self._path.exists():
+            z = np.load(self._path)
+            for b, s, c, f in zip(z["boxes"], z["scores"], z["classes"], z["frame_idx"]):
+                self._cache.setdefault(int(f), []).append(
+                    Detection(tuple(float(v) for v in b), float(s), int(c)))
+            # frames with zero detections still count as cached: track via max index
+            self._max_cached = int(z["frame_idx"].max()) if len(z["frame_idx"]) else -1
+            self._n_frames_cached = int(z.get("n_frames", [self._max_cached + 1])[0])
+        else:
+            self._n_frames_cached = 0
+
+    def predict(self, image_bgr) -> "list[Detection]":
+        f = self._next_frame
+        self._next_frame += 1
+        if f < self._n_frames_cached:
+            return self._cache.get(f, [])
+        dets = self._inner.predict(image_bgr)
+        self._cache[f] = dets
+        self._dirty = True
+        return dets
+
+    def flush(self) -> None:
+        if not self._dirty:
+            return
+        import numpy as np
+        rows = [(d.box_xyxy, d.score, d.class_id, f)
+                for f, ds in sorted(self._cache.items()) for d in ds]
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            self._path,
+            boxes=np.array([r[0] for r in rows], np.float32).reshape(-1, 4),
+            scores=np.array([r[1] for r in rows], np.float32),
+            classes=np.array([r[2] for r in rows], np.int32),
+            frame_idx=np.array([r[3] for r in rows], np.int32),
+            n_frames=np.array([self._next_frame], np.int32))
+        self._dirty = False
