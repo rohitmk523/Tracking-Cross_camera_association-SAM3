@@ -26,7 +26,11 @@ _LARGE = 1e6
 # reproduced the over-counting config). NOTE: tuned while NL/NR were unknowingly unsynced —
 # re-tune (esp. cluster_dist=600) now that sync is strict and the clips carry audio.
 TUNED = {"max_assoc_dist": 600.0, "gate_cost": 7.0, "w_t": 1.0, "w_a": 3.0,
-         "min_hits": 4, "cluster_dist": 600.0}
+         "min_hits": 4, "cluster_dist": 600.0,
+         # identity memory (operator v0 review: labels churned on a 60s window
+         # because re-entry expired after 5s) — batch processing affords keeping
+         # every lost identity claimable for the WHOLE window
+         "reentry_frames": 100000, "lost_buffer": 60}
 
 
 @dataclass
@@ -379,11 +383,29 @@ class FusionEngine:
             cur = best.get(key)
             if cur is None:
                 best[key] = t
-            elif t.hits > cur.hits:
-                cur._jersey.clear()
-                best[key] = t
+                continue
+            elder, junior = (cur, t) if cur.hits >= t.hits else (t, cur)
+            # JERSEY HANDOFF (operator v0 review: visible number, changing id): the
+            # committed number is proof of identity — absorb the junior into the
+            # elder unless appearance clearly disagrees (protects against a misread
+            # gluing two different players)
+            both_live_now = elder.time_since_update == 0 and junior.time_since_update == 0
+            if not both_live_now and not (junior.reid is not None and elder.reid is not None
+                                          and _cos(junior.reid, elder.reid) < 0.5):
+                elder._team.update(junior._team)
+                elder._jersey.update(junior._jersey)
+                if junior._reid_sum is not None:
+                    elder._reid_sum = junior._reid_sum if elder._reid_sum is None                         else elder._reid_sum + junior._reid_sum
+                    elder._reid = elder._reid_sum / (np.linalg.norm(elder._reid_sum) + 1e-8)
+                elder.hits += junior.hits
+                for cam, hit in junior.recent_cams.items():
+                    if cam not in elder.recent_cams or hit[0] > elder.recent_cams[cam][0]:
+                        elder.recent_cams[cam] = hit
+                self.merged[junior.id] = elder.id
+                self.tracks = [x for x in self.tracks if x.id != junior.id]
             else:
-                t._jersey.clear()
+                junior._jersey.clear()               # appearance says different person
+            best[key] = elder
 
 
 def fuse_sequence(frames: list[list[Observation]], **kw) -> list[list[dict]]:
