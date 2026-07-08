@@ -181,7 +181,10 @@ body{background:#111;color:#eee;font-family:sans-serif;margin:10px}
  <span id="who"></span> | frame <span id="f">0</span>/<span id="n">?</span>
  | approved <span id="ap">0</span>
  | keys: <b>a</b>=approve+next &nbsp;<b>&larr;/&rarr;</b>=move &nbsp;<b>Shift+&larr;/&rarr;</b>=&plusmn;10
+ &nbsp;<b>Home/End</b>=start/end
+ | go to <input id="goto" type="number" min="0" style="width:70px;background:#222;color:#eee;border:1px solid #555">
 </div>
+<input id="slider" type="range" min="0" value="0" style="width:100%;max-width:1600px">
 <div id="players"></div>
 <img id="img"/>
 <script>
@@ -196,13 +199,21 @@ async function state(){const r=await fetch('/state');const s=await r.json();n=s.
  player=s.player;document.getElementById('who').textContent=player;
  document.getElementById('ap').textContent=s.approved[player]||0;}
 function load(){document.getElementById('img').src='/frame/'+f+'?t='+Date.now();
- document.getElementById('f').textContent=f;}
+ document.getElementById('f').textContent=f;
+ const sl=document.getElementById('slider'); sl.max=n-1; sl.value=f;}
+document.getElementById('slider').oninput=e=>{f=parseInt(e.target.value)||0;load();};
+document.getElementById('goto').onkeydown=e=>{
+ if(e.key==='Enter'){f=Math.min(Math.max(parseInt(e.target.value)||0,0),n-1);load();e.target.blur();}
+ e.stopPropagation();};
 document.getElementById('img').onclick=async e=>{
  const r=e.target.getBoundingClientRect();
  const sx=1600/r.width, sy=900/r.height;
  await fetch('/click',{method:'POST',headers:{'Content-Type':'application/json'},
   body:JSON.stringify({f:f,x:(e.clientX-r.left)*sx,y:(e.clientY-r.top)*sy})});load();};
 document.onkeydown=async e=>{
+ if(e.target.tagName==='INPUT'&&e.target.type==='number')return;
+ if(e.key==='Home'){f=0;load();return;}
+ if(e.key==='End'){f=n-1;load();return;}
  if(e.key==='a'){await fetch('/approve/'+f,{method:'POST'});f=Math.min(f+1,n-1);load();state();}
  else if(e.key==='ArrowRight'){f=Math.min(f+(e.shiftKey?10:1),n-1);load();}
  else if(e.key==='ArrowLeft'){f=Math.max(f-(e.shiftKey?10:1),first);load();}};
