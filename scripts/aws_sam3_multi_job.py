@@ -25,13 +25,17 @@ ANGLES = ("FL", "FR", "NL", "NR")
 
 
 def userdata(bundle_url, weights_url, results_url, log_url, cmds: list[str]) -> str:
-    body = "\n".join(cmds)
+    # after EVERY camera pass, re-tar out/ and upload — an interruption (spot reclaim,
+    # failsafe) loses only the pass in progress, never the finished ones
+    body = "\n".join(
+        c + f'\ntar czf results.tar.gz -C out . && curl -sS -o /dev/null -T results.tar.gz "{results_url}" && echo "[boot] incremental upload done"'
+        for c in cmds)
     return f"""#!/bin/bash
 exec > /var/log/sam3.log 2>&1
 export HOME=/root PYTHONUNBUFFERED=1
 LOG_URL="{log_url}"
 (while true; do sleep 30; curl -s -T /var/log/sam3.log "$LOG_URL" >/dev/null 2>&1 || true; done) &
-(sleep 10800; echo "[boot] 3h failsafe shutdown"; shutdown -h now) &
+(sleep 18000; echo "[boot] 5h failsafe shutdown"; shutdown -h now) &
 PYBIN=""
 for P in /opt/pytorch/bin/python /usr/bin/python3; do
   if [ -x "$P" ] && $P -c "import torch,sys;sys.exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then PYBIN=$P; break; fi
@@ -96,7 +100,7 @@ def launch(a) -> None:
                   presign("put", J.results_key(tag), 86400), presign("put", J.log_key(tag), 86400),
                   cmds)
     ec2 = boto3.client("ec2", region_name=region)
-    r = ec2.run_instances(
+    kw = dict(
         ImageId=aws.get("ami"), InstanceType=aws.get("instance_type", "g5.2xlarge"),
         MinCount=1, MaxCount=1, InstanceInitiatedShutdownBehavior="terminate",
         BlockDeviceMappings=[{"DeviceName": "/dev/sda1",
@@ -104,10 +108,14 @@ def launch(a) -> None:
                                       "DeleteOnTermination": True}}],
         UserData=ud,
         TagSpecifications=[{"ResourceType": "instance",
-                            "Tags": [{"Key": "Name", "Value": "uball-sam3-multi"}]}])
+                            "Tags": [{"Key": "Name", "Value": f"uball-sam3-multi-{tag}"}]}])
+    if a.spot:
+        kw["InstanceMarketOptions"] = {"MarketType": "spot",
+                                       "SpotOptions": {"SpotInstanceType": "one-time"}}
+    r = ec2.run_instances(**kw)
     iid = r["Instances"][0]["InstanceId"]
-    print(f"launched {iid} ({aws.get('instance_type')}) — {len(cmds)} multi-object passes, "
-          f"3h failsafe, self-terminates")
+    print(f"launched {iid} ({aws.get('instance_type')}{' SPOT' if a.spot else ''}) — "
+          f"{len(cmds)} multi-object passes, incremental uploads, 5h failsafe")
     print(f"log:     s3://{bucket}/{J.log_key(tag)}")
     print(f"results: s3://{bucket}/{J.results_key(tag)}   (then: --fetch --tag2 {tag})")
 
@@ -117,7 +125,7 @@ def fetch(a) -> None:
     aws = J._aws_cfg()
     region, bucket = aws.get("region", "us-east-1"), aws.get("s3_bucket")
     s3 = boto3.client("s3", region_name=region)
-    out = REPO / "runs/sam3_players_multi"
+    out = REPO / ("runs/sam3_players_multi" if a.game == "e6fba750" else f"runs/sam3_players_multi_{a.game[:3]}")
     out.mkdir(parents=True, exist_ok=True)
     tarp = out / "results.tar.gz"
     s3.download_file(bucket, J.results_key(a.tag2), str(tarp))
@@ -134,6 +142,7 @@ def main() -> int:
     ap.add_argument("--tag2", default="e6multi", help="job tag (S3 scoping)")
     ap.add_argument("--fetch", action="store_true")
     ap.add_argument("--i-rotated-creds", action="store_true")
+    ap.add_argument("--spot", action="store_true", help="spot instance (~60%% cheaper, reclaim-safe via incremental uploads)")
     a = ap.parse_args()
     if a.fetch:
         fetch(a)

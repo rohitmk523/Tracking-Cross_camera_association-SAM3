@@ -42,9 +42,10 @@ def main() -> int:
     ap.add_argument("--iou-attach", type=float, default=0.4)
     a = ap.parse_args()
     key = f"{a.game}_{a.tag}"
-    offs = OFFS[key]
+    adoc = json.loads((REPO / f"runs/anchors/{key}.jersey_anchors.json").read_text())
+    offs = OFFS.get(key) or adoc["offsets"]
 
-    anchors = json.loads((REPO / f"runs/anchors/{key}.jersey_anchors.json").read_text())["anchors"]
+    anchors = adoc["anchors"]
     total = Counter(ev["number"] for ev in anchors if ev.get("conf", 0) >= a.min_conf)
     roster = {n for n, c in total.items() if c >= a.min_reads}
 
@@ -59,19 +60,35 @@ def main() -> int:
                  if ev["cam"] == ang and ev["number"] in roster and ev.get("conf", 0) >= a.min_conf]
 
         def confirmed_at(F):
-            """{number: det_box} identity-confirmed at clip frame F."""
-            got = {}
-            for ev in reads:
-                cf = ev["frame"] + offs[ang]           # read on clip timeline
-                if abs(cf - F) > a.near or ev["number"] in got:
+            """{label: det_box} identity-confirmed at clip frame F. A number worn by
+            two players (both teams) yields two instances: #3a, #3b — each a distinct
+            read-confirmed detection."""
+            claimed = []                           # [(number, det_box, read_frame)]
+            for ev in sorted(reads, key=lambda e: abs(e["frame"] + offs[ang] - F)):
+                cf = ev["frame"] + offs[ang]       # read on clip timeline
+                if abs(cf - F) > a.near:
                     continue
                 best, bi = 0.0, None
                 for db in dets.get(F, []):
                     v = iou(db, ev["box"])
                     if v > best:
                         best, bi = v, db
-                if best >= a.iou_attach:
-                    got[ev["number"]] = bi
+                if best < a.iou_attach:
+                    continue
+                if any(iou(bi, b) > 0.5 for _, b, _ in claimed):
+                    continue                       # detection already claimed
+                prior = [c for c in claimed if c[0] == ev["number"]]
+                # 2nd instance of a number = two players (both teams) wear it; require
+                # near-simultaneous reads at distinct bodies, else it's the same player
+                # re-matched after moving. Max 2 (one per team).
+                if prior and (len(prior) >= 2 or abs(prior[0][2] - cf) > 4):
+                    continue
+                claimed.append((ev["number"], bi, cf))
+            got, seen = {}, Counter()
+            for num, b, _ in sorted(claimed, key=lambda c: (c[0], c[2])):
+                suf = "ab"[seen[num]] if sum(1 for n, _, _ in claimed if n == num) > 1 else ""
+                seen[num] += 1
+                got[f"#{num}{suf}"] = b
             return got
 
         # candidate frames: sample every 5th frame with detections
