@@ -35,7 +35,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--game", required=True)
     ap.add_argument("--tag", required=True)
-    ap.add_argument("--stride", type=int, default=2,
+    ap.add_argument("--stride", type=int, default=1,
                     help="read every Nth frame (2 = ~15 reads/s, plenty of anchor density)")
     a = ap.parse_args()
 

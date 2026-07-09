@@ -74,7 +74,7 @@ def main() -> int:
         dets[ang] = m
     anchors = defaultdict(list)   # (cam, ref_frame) -> [(box, number)]
     for ev in json.loads((REPO / f"runs/anchors/{key}.jersey_anchors.json").read_text())["anchors"]:
-        anchors[(ev["cam"], ev["frame"])].append((ev["box"], int(ev["number"])))
+        anchors[(ev["cam"], ev["frame"])].append((ev["box"], int(ev["number"]), ev.get("conf", 1.0)))
     gtp = REPO / f"data/gt_players/{key}.json"
     gt = json.loads(gtp.read_text()) if gtp.exists() else {}
     if a.only and a.only not in gt:
@@ -119,9 +119,9 @@ def main() -> int:
                 sr = sam.get(ang, {}).get(cf)
                 if not sr:
                     continue
-                for abox, anum in anchors.get((ang, f), []):
+                for abox, anum, aconf in anchors.get((ang, f), []):
                     if anum == num and iou(sr["box"], abox) >= 0.3:
-                        pts.append(court(ang, sr["box"])); ws.append(ZONE[ang])
+                        pts.append(court(ang, sr["box"])); ws.append(ZONE[ang] * aconf)
                         break
             if pts:
                 anchor_pos[f] = np.average(pts, axis=0, weights=ws)
@@ -142,7 +142,7 @@ def main() -> int:
                     read[f] = None
                     continue
                 r = 0
-                for abox, anum in anchors.get((ang, f), []):
+                for abox, anum, aconf in anchors.get((ang, f), []):
                     if iou(sr["box"], abox) >= 0.3:
                         r = 1 if anum == num else -1
                         break
@@ -206,7 +206,7 @@ def main() -> int:
                 sr = sam.get(ang, {}).get(cf)
                 # anchor camera keeps its (confirmed) box
                 is_anchor = sr and any(anum == num and iou(sr["box"], abox) >= 0.3
-                                       for abox, anum in anchors.get((ang, f), []))
+                                       for abox, anum, _ in anchors.get((ang, f), []))
                 if is_anchor:
                     corrected[(ang, f)] = sr["box"]
                     continue
