@@ -68,14 +68,23 @@ def main() -> int:
         (x, y), = project_pixels([((box[0] + box[2]) / 2, box[3])], calib[ang])
         return np.array([x, y])
 
-    # players with a number and GT
+    # players to TRACK for mutual exclusion: the full roster (from rosterseeds if present,
+    # else the GT players). Scoring is only done on players that have GT.
+    roster_p = REPO / f"runs/anchors/{key}.rosterseeds.json"
+    if roster_p.exists() and a.sam3_dir.endswith("roster"):
+        roster_nums = [int(pl.lstrip("#")) for pl in json.loads(roster_p.read_text())["seeds"]]
+    else:
+        roster_nums = [int("".join(ch for ch in pl if ch.isdigit()))
+                       for pl, v in gt.items()
+                       if "".join(ch for ch in pl if ch.isdigit()) and not pl.startswith("ref")
+                       and len(v.get("approved", {})) >= 30]
+    gt_nums = {int("".join(ch for ch in pl if ch.isdigit())): pl for pl, v in gt.items()
+               if "".join(ch for ch in pl if ch.isdigit()) and not pl.startswith("ref")
+               and len(v.get("approved", {})) >= 30}
     players = []
     sam_by_pl = {}
-    for pl, v in gt.items():
-        digits = "".join(ch for ch in pl if ch.isdigit())
-        if not digits or pl.startswith("ref") or len(v.get("approved", {})) < 30:
-            continue
-        num = int(digits)
+    for num in sorted(set(roster_nums)):
+        pl = gt_nums.get(num, f"#{num}")
         safe = pl.replace("#", "n").replace(" ", "")
         sam = {}
         for ang in ANGLES:
@@ -88,17 +97,25 @@ def main() -> int:
             sam_by_pl[pl] = sam
 
     # --- per-player truth court position each frame (anchor + interp) ---
+    def player_frames(pl, sam):
+        if pl in gt and gt[pl].get("approved"):
+            return sorted(int(f) for f, s in gt[pl]["frames"].items()
+                          if s and str(f) in gt[pl].get("approved", {}))
+        mf = set()                                    # no GT: masklet union on ref timeline
+        for ang in ANGLES:
+            for cf in sam.get(ang, {}):
+                mf.add(cf - offs[ang])
+        return sorted(mf)
+
     all_frames = set()
     for pl, _ in players:
-        for f in gt[pl]["frames"]:
-            all_frames.add(int(f))
+        all_frames.update(player_frames(pl, sam_by_pl[pl]))
     truth = {pl: {} for pl, _ in players}
     for pl, num in players:
         sam = sam_by_pl[pl]
-        sel = {int(f): s for f, s in gt[pl]["frames"].items()
-               if s and str(f) in gt[pl].get("approved", {})}
+        frames_p = player_frames(pl, sam)
         anchor_pos = {}
-        for f in sorted(sel):
+        for f in frames_p:
             pts, ws = [], []
             for ang in ANGLES:
                 sr = sam.get(ang, {}).get(f + offs[ang])
@@ -153,9 +170,11 @@ def main() -> int:
                 if j < nD and C[i, j] < 1e5:
                     assigned[present[i][0]][(ang, f)] = cand[j]
 
-    # --- score per-camera fidelity (all-angles) ---
+    # --- score per-camera fidelity (all-angles) — only players WITH GT ---
     report = {}
     for pl, num in players:
+        if pl not in gt or not gt[pl].get("approved"):
+            continue
         sel = {int(f): s for f, s in gt[pl]["frames"].items()
                if s and str(f) in gt[pl].get("approved", {})}
         pc = {}
