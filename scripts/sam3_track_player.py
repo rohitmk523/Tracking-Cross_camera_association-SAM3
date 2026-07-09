@@ -24,6 +24,88 @@ import tempfile
 from pathlib import Path
 
 
+def _mask_box(r, np):
+    """Extract (box, score, area) from a SAM3 result, mask preferred. None if empty."""
+    masks = getattr(r, "masks", None)
+    boxes = getattr(r, "boxes", None)
+    if masks is not None and getattr(masks, "data", None) is not None and len(masks.data):
+        m = masks.data[0].cpu().numpy() > 0.5
+        area = int(m.sum())
+        if area > 40:
+            ys, xs = np.where(m)
+            sc = (round(float(boxes.conf[0]), 3)
+                  if boxes is not None and getattr(boxes, "conf", None) is not None
+                  and len(boxes.conf) else 1.0)
+            return ([float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max())], sc, area)
+    if boxes is not None and len(boxes):
+        xyxy = boxes.xyxy[0].cpu().numpy()
+        sc = (round(float(boxes.conf[0]), 3)
+              if getattr(boxes, "conf", None) is not None and len(boxes.conf) else 1.0)
+        return ([round(float(v), 1) for v in xyxy], sc, 0)
+    return None
+
+
+def _segment(video, seed_frame, box, end_frame, weights, imgsz, device, cv2, np, Pred):
+    """Seed one box at seed_frame; propagate until end_frame. Returns {abs_frame: rec}."""
+    cap = cv2.VideoCapture(video)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 29.97
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.set(cv2.CAP_PROP_POS_FRAMES, seed_frame)
+    tmp = Path(tempfile.mkdtemp()) / "seg.mp4"
+    vw = cv2.VideoWriter(str(tmp), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+    n = 0
+    want = end_frame - seed_frame
+    while n < want:
+        ok, im = cap.read()
+        if not ok:
+            break
+        vw.write(im)
+        n += 1
+    cap.release()
+    vw.release()
+    pred = Pred(overrides=dict(conf=0.25, task="segment", mode="predict", imgsz=imgsz,
+                               model=weights, half=(device == "cuda"), save=False,
+                               verbose=False, device=device))
+    out = {}
+    for i, r in enumerate(pred(source=str(tmp), bboxes=[box], stream=True)):
+        mb = _mask_box(r, np)
+        af = seed_frame + i
+        out[af] = ({"box": mb[0], "score": mb[1], "mask_area": mb[2], "present": True}
+                   if mb else {"box": None, "score": 0.0, "mask_area": 0, "present": False})
+    del pred
+    return out
+
+
+def _run_reseeded(a, box, device, cv2, np, torch, Pred) -> int:
+    anchors = [{"frame": a.seed_frame, "box": box}] + [
+        {"frame": r["frame"], "box": r["box"]} for r in json.loads(a.reseeds)]
+    anchors.sort(key=lambda x: x["frame"])
+    cap = cv2.VideoCapture(a.video)
+    clip_end = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.release()
+    frames_out = {}
+    for k, an in enumerate(anchors):
+        # this segment OWNS [an.frame, next_anchor.frame); propagate a little past for overlap
+        own_end = anchors[k + 1]["frame"] if k + 1 < len(anchors) else clip_end
+        prop_end = min(clip_end, own_end + 30)
+        seg = _segment(a.video, an["frame"], an["box"], prop_end, a.weights, a.imgsz,
+                       device, cv2, np, Pred)
+        for af, rec in seg.items():
+            if an["frame"] <= af < own_end:          # keep only this segment's owned span
+                frames_out[str(af)] = rec
+        print(f"[{a.player} {a.cam}] segment {k+1}/{len(anchors)} seed@{an['frame']} "
+              f"owns->{own_end} ({sum(1 for f in seg if an['frame']<=f<own_end)} frames)", flush=True)
+    n_present = sum(1 for v in frames_out.values() if v["present"])
+    Path(a.out).write_text(json.dumps(
+        {"player": a.player, "cam": a.cam, "seed_frame": a.seed_frame, "seed_box": box,
+         "imgsz": a.imgsz, "reseeded": True, "n_anchors": len(anchors),
+         "n_frames": len(frames_out), "n_present": n_present, "frames": frames_out}))
+    print(f"[{a.player} {a.cam}] RESEEDED done: {len(anchors)} anchors, present "
+          f"{n_present}/{len(frames_out)} -> {a.out}", flush=True)
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--video", required=True)
@@ -34,6 +116,11 @@ def main() -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--weights", default="sam3.pt")
     ap.add_argument("--imgsz", type=int, default=1024)
+    ap.add_argument("--reseeds", default=None,
+                    help='JSON [{"frame":F,"box":[x1,y1,x2,y2]}, ...]: re-anchor the track '
+                         "at each confident number reading (drift-resistant). The first "
+                         "anchor is --seed-frame/--seed-box; each re-seed starts a fresh "
+                         "SAM3 segment that owns frames until the next anchor.")
     a = ap.parse_args()
 
     import cv2
@@ -43,6 +130,9 @@ def main() -> int:
 
     box = [float(v) for v in a.seed_box.split(",")]
     device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    if a.reseeds:
+        return _run_reseeded(a, box, device, cv2, np, torch, SAM3VideoPredictor)
 
     # --- trim decode to [seed_frame:] into a temp clip so the box seeds frame 0 ---
     cap = cv2.VideoCapture(a.video)

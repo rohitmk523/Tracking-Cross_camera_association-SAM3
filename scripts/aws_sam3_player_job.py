@@ -78,11 +78,16 @@ def launch(a) -> None:
             clips.add(REPO / "data/clips" / clip)
             box = ",".join(str(v) for v in d["seed_box"])
             outp = f"out/{a.game}_{a.tag}__{safe}__{cam}.json"
+            reseed_arg = ""
+            if d.get("reseeds"):
+                import json as _j
+                rs = _j.dumps(d["reseeds"]).replace('"', '\\"')
+                reseed_arg = f' --reseeds "{rs}"'
             cmds.append(
                 f'echo "=== {pl} {cam} ==="; $PYBIN sam3_track_player.py '
                 f'--video "clips/{clip}" --seed-frame {d["seed_frame"]} '
                 f'--seed-box "{box}" --player "{pl}" --cam {cam} --out "{outp}" '
-                f'--weights /work/sam3.pt || RC=1')
+                f'--weights /work/sam3.pt{reseed_arg} || RC=1')
 
     clips = sorted(clips)
     b = bundle(clips, seeds_path)
