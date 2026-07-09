@@ -74,6 +74,29 @@ resolution, two team-mates in identical kit who collide are genuinely pixel-iden
 SAM3 and for every tracker on Earth. That is why no off-the-shelf product solves this; it is
 a known hard limit of the whole industry at this camera count.
 
+## 3b · The breakthrough approach — SAM3 tracking ONE player at a time
+
+We had been using SAM3 the wrong way (asking it to find *everyone* at once, which
+fragments). The right way — the industry recipe — is to hand SAM3 **one player** and
+say "follow him." We ran that on AWS: **20 single-object tracks** (5 ground-truthed
+players × 4 cameras), each seeded once and then tracking that player on its own, graded
+against the human truth.
+
+| Player | Tracked correctly (4 cameras fused) | Court accuracy |
+|---|---|---|
+| **Referee** (distinct kit) | **96%** | **8 cm** |
+| #11 | 85% | 10 cm |
+| #6 / #43 | 67–68% | 24–28 cm |
+| #22 (same-kit) | 63% | 19 cm |
+
+**Two big findings.** First — **the engine works**: the referee, who wears clothing
+nobody else does, is tracked at **96% with 8 cm court accuracy**, one identity carried
+across four cameras as each drops out and the others cover. That is the whole
+architecture, proven. Second — for same-kit players, SAM3's mask sometimes **slides onto
+a team-mate** in a weak camera; fused across four cameras that still yields 63–85%, and
+where it's on the right player the position is accurate to 8–28 cm. The gap is entirely
+the same-kit-team-mate problem — the known hard limit — not the tracking machinery.
+
 ## 4 · The fix we are building — jersey numbers as anchors
 
 The move that beats the physics is one no live tracker can do but our **batch (overnight)**
