@@ -29,7 +29,8 @@ import numpy as np
 REPO = Path(__file__).resolve().parents[1]
 ANGLES = ("FL", "FR", "NL", "NR")
 OFFS = {"e6fba750_44_60": {"FL": 0, "FR": -11, "NL": -1, "NR": -1},
-        "c2a354fe_300_60": {"FL": 0, "FR": -4, "NL": -3, "NR": -4}}
+        "c2a354fe_300_60": {"FL": 0, "FR": -4, "NL": -3, "NR": -4},
+        "e6fba750_44_180": {"FL": 0, "FR": -11, "NL": -1, "NR": -1}}
 ZONE = {"FL": 0.6, "FR": 0.6, "NL": 1.0, "NR": 1.0}
 
 
@@ -49,8 +50,14 @@ def main() -> int:
     ap.add_argument("--sam3-dir", default="runs/sam3_players_jersey")
     ap.add_argument("--iou-hit", type=float, default=0.3)
     ap.add_argument("--reacq-cm", type=float, default=180.0)
+    ap.add_argument("--carry", action="store_true",
+                    help="carry a confirmed camera along its SAM3 mask between reads "
+                         "(helps dense-anchor players, can drift sparse ones)")
     ap.add_argument("--max-interp-frames", type=int, default=150,
                     help="don't interpolate truth across gaps longer than this (~5s)")
+    ap.add_argument("--dump-dir", default=None,
+                    help="write corrected per-camera masklets here (for rendering)")
+    ap.add_argument("--only", default=None, help="restrict to one player, e.g. '#11'")
     a = ap.parse_args()
     from uball_cc.fusion.homography import load_calib, project_pixels
 
@@ -68,7 +75,10 @@ def main() -> int:
     anchors = defaultdict(list)   # (cam, ref_frame) -> [(box, number)]
     for ev in json.loads((REPO / f"runs/anchors/{key}.jersey_anchors.json").read_text())["anchors"]:
         anchors[(ev["cam"], ev["frame"])].append((ev["box"], int(ev["number"])))
-    gt = json.loads((REPO / f"data/gt_players/{key}.json").read_text())
+    gtp = REPO / f"data/gt_players/{key}.json"
+    gt = json.loads(gtp.read_text()) if gtp.exists() else {}
+    if a.only and a.only not in gt:
+        gt = {a.only: {"frames": {}, "approved": {}}}   # no-GT: build frames from masklets
 
     def court(ang, box):
         (x, y), = project_pixels([((box[0] + box[2]) / 2, box[3])], calib[ang])
@@ -76,6 +86,8 @@ def main() -> int:
 
     report = {}
     for pl, v in gt.items():
+        if a.only and pl != a.only:
+            continue
         digits = "".join(ch for ch in pl if ch.isdigit())
         if not digits or pl.startswith("ref"):
             continue
@@ -90,6 +102,12 @@ def main() -> int:
         if not sam:
             continue
         sel = {int(f): s for f, s in v["frames"].items() if s and str(f) in v.get("approved", {})}
+        if not sel:                                     # no GT -> frames from masklet union (ref timeline)
+            mf = set()
+            for ang in ANGLES:
+                for cf in sam.get(ang, {}):
+                    mf.add(cf - offs[ang])
+            sel = {f: {} for f in sorted(mf)}
         frames = sorted(sel)
 
         # --- 1. anchor court positions: frames where a jersey read of N confirms a SAM3 mask ---
@@ -108,15 +126,75 @@ def main() -> int:
             if pts:
                 anchor_pos[f] = np.average(pts, axis=0, weights=ws)
 
-        # --- 2. truth position: anchors, linearly interpolated across short gaps ---
-        akeys = sorted(anchor_pos)
-        truth = dict(anchor_pos)
-        for a0, a1 in zip(akeys, akeys[1:]):
+        # --- 1b. CARRY: a camera confirmed as N at frame f stays trusted along its SAM3
+        # mask continuity (present, smooth) until a CONTRADICTING read or a mask break.
+        # This extends truth from sparse read-frames to wherever a confirmed camera holds
+        # the player. Each camera builds its own set of confirmed frames + boxes.
+        confirmed = {ang: {} for ang in ANGLES}        # ang -> {ref_frame: box}
+        for ang in (ANGLES if a.carry else []):
+            fs = [f for f in frames]
+            # mark frames with a matching/contradicting read on this cam's mask
+            read = {}   # f -> +1 (match N) / -1 (other number) / 0 (none)
+            for f in fs:
+                cf = f + offs[ang]
+                sr = sam.get(ang, {}).get(cf)
+                if not sr:
+                    read[f] = None
+                    continue
+                r = 0
+                for abox, anum in anchors.get((ang, f), []):
+                    if iou(sr["box"], abox) >= 0.3:
+                        r = 1 if anum == num else -1
+                        break
+                read[f] = r
+            # expand from every +1 frame forward and backward along present, non-contradicted mask
+            for f0 in [f for f in fs if read.get(f) == 1]:
+                for step in (1, -1):
+                    f = f0
+                    while True:
+                        cf = f + offs[ang]
+                        sr = sam.get(ang, {}).get(cf)
+                        if sr is None or read.get(f) == -1:
+                            break
+                        confirmed[ang][f] = sr["box"]
+                        nf = f + step
+                        if nf not in sel:
+                            break
+                        # require mask continuity (present within 3 frames) to keep carrying
+                        ncf = nf + offs[ang]
+                        if sam.get(ang, {}).get(ncf) is None:
+                            # allow a 3-frame gap
+                            if all(sam.get(ang, {}).get(nf + k + offs[ang]) is None
+                                   for k in range(0, 4) if (nf + k) in sel):
+                                break
+                        f = nf
+
+        # --- 2. truth position: confirmed-camera consensus each frame (outlier-rejected),
+        # then linear interpolation across any remaining short gaps ---
+        # base truth on anchor frames always; carry adds confirmed spans when on
+        truth = {}
+        for f in frames:
+            pts, ws = [], []
+            if not a.carry and f in anchor_pos:
+                truth[f] = anchor_pos[f]
+                continue
+            for ang in ANGLES:
+                if f in confirmed[ang]:
+                    pts.append(court(ang, confirmed[ang][f])); ws.append(ZONE[ang])
+            if pts:
+                pts = np.array(pts); ws = np.array(ws)
+                med = np.median(pts, axis=0)
+                keep = np.linalg.norm(pts - med, axis=1) <= 150.0
+                if keep.sum() == 0:
+                    keep[:] = True
+                truth[f] = np.average(pts[keep], axis=0, weights=ws[keep])
+        akeys = sorted(truth)
+        for a0, a1 in zip(list(akeys), list(akeys)[1:]):
             gap = a1 - a0
             if 1 < gap <= a.max_interp_frames:
-                p0, p1 = anchor_pos[a0], anchor_pos[a1]
+                p0, p1 = truth[a0], truth[a1]
                 for f in range(a0 + 1, a1):
-                    if f in sel:
+                    if f in sel and f not in truth:
                         truth[f] = p0 + (p1 - p0) * ((f - a0) / gap)
 
         # --- 3. correct every camera each frame from truth ---
@@ -187,6 +265,18 @@ def main() -> int:
                 if gpos and spos:
                     court_err.append(float(np.linalg.norm(
                         np.average(gpos, axis=0, weights=gw) - np.average(spos, axis=0, weights=sw))))
+        if a.dump_dir:
+            dd = REPO / a.dump_dir
+            dd.mkdir(parents=True, exist_ok=True)
+            for ang in ANGLES:
+                frames_j = {}
+                for f in frames:
+                    cb = corrected.get((ang, f))
+                    if cb:
+                        frames_j[str(f + offs[ang])] = {"box": [round(x, 1) for x in cb],
+                                                        "present": True, "score": 1.0}
+                (dd / f"{key}__{safe}__{ang}.json").write_text(
+                    json.dumps({"player": pl, "cam": ang, "frames": frames_j}))
         report[pl] = {"fused_coverage": round(fused_hit / max(1, fused_n), 3),
                       "per_camera_fidelity": percam,
                       "court_err_cm_median": round(float(np.median(court_err)), 1) if court_err else None,
