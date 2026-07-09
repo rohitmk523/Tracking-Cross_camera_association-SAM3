@@ -24,7 +24,8 @@ from uball_cc.fusion.homography import load_calib, project_pixels  # noqa: E402
 ANGLES = ("FL", "FR", "NL", "NR")
 W, H, FPS = 1920, 1080, 30
 HL = (0, 240, 255)
-OFFS = {"e6fba750_44_60": {"FL": 0, "FR": -11, "NL": -1, "NR": -1}}
+OFFS = {"e6fba750_44_60": {"FL": 0, "FR": -11, "NL": -1, "NR": -1},
+        "e6fba750_44_180": {"FL": 0, "FR": -11, "NL": -1, "NR": -1}}
 ZONE = {"FL": 0.6, "FR": 0.6, "NL": 1.0, "NR": 1.0}
 
 
@@ -34,6 +35,7 @@ def main() -> int:
     ap.add_argument("--tag", required=True)
     ap.add_argument("--player", required=True)
     ap.add_argument("--sam3-dir", default="runs/sam3_players")
+    ap.add_argument("--suffix", default="", help="output filename suffix (avoid overwrite)")
     a = ap.parse_args()
     key = f"{a.game}_{a.tag}"
     offs = OFFS[key]
@@ -67,7 +69,7 @@ def main() -> int:
     gy0 = 74 + (H - 74 - 720) // 2
     cx0 = 1280 + (640 - vw_) // 2
     cy0 = 74 + (H - 74 - vh) // 2
-    out = REPO / f"runs/tracking/sam3player_{safe}_{a.game}_raw.mp4"
+    out = REPO / f"runs/tracking/sam3player_{safe}{a.suffix}_{a.game}_raw.mp4"
     vw = cv2.VideoWriter(str(out), cv2.VideoWriter_fourcc(*"mp4v"), FPS, (W, H))
     trail = []
     for f in range(n):
@@ -113,7 +115,7 @@ def main() -> int:
     vw.release()
     for c in caps.values():
         c.release()
-    final = REPO / f"runs/tracking/sam3player_{safe}_{a.game}.mp4"
+    final = REPO / f"runs/tracking/sam3player_{safe}{a.suffix}_{a.game}.mp4"
     subprocess.run(["ffmpeg", "-y", "-i", str(out), "-c:v", "libx264", "-preset", "fast",
                     "-crf", "23", "-pix_fmt", "yuv420p", str(final)], check=True, capture_output=True)
     out.unlink()
