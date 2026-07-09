@@ -112,9 +112,28 @@ def launch(a) -> None:
     if a.spot:
         kw["InstanceMarketOptions"] = {"MarketType": "spot",
                                        "SpotOptions": {"SpotInstanceType": "one-time"}}
-    r = ec2.run_instances(**kw)
+    # capacity sweep: every AZ (default VPC subnets) x instance-type fallbacks —
+    # a single-AZ launch fails on InsufficientInstanceCapacity even when other AZs have it
+    subnets = ec2.describe_subnets(Filters=[{"Name": "default-for-az", "Values": ["true"]}])["Subnets"]
+    az_subnet = {s["AvailabilityZone"]: s["SubnetId"] for s in subnets}
+    types = [aws.get("instance_type", "g5.2xlarge"), "g5.xlarge", "g6.2xlarge"]
+    r = None
+    for it in types:
+        for az, sn in sorted(az_subnet.items()):
+            try:
+                r = ec2.run_instances(**{**kw, "InstanceType": it, "SubnetId": sn})
+                print(f"capacity found: {it} in {az}")
+                break
+            except Exception as e:
+                if "InsufficientInstanceCapacity" in str(e) or "Unsupported" in str(e):
+                    continue
+                raise
+        if r:
+            break
+    if not r:
+        raise SystemExit("no capacity in any AZ/type — retry later")
     iid = r["Instances"][0]["InstanceId"]
-    print(f"launched {iid} ({aws.get('instance_type')}{' SPOT' if a.spot else ''}) — "
+    print(f"launched {iid}{' SPOT' if a.spot else ''} — "
           f"{len(cmds)} multi-object passes, incremental uploads, 5h failsafe")
     print(f"log:     s3://{bucket}/{J.log_key(tag)}")
     print(f"results: s3://{bucket}/{J.results_key(tag)}   (then: --fetch --tag2 {tag})")
