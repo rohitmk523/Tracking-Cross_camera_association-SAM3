@@ -67,7 +67,7 @@ def launch(a) -> None:
     J._ensure_weights(s3, bucket)
 
     key = f"{a.game}_{a.tag}"
-    seeds_path = REPO / f"runs/anchors/{key}.seeds.json"
+    seeds_path = REPO / f"runs/anchors/{key}.{a.seeds_name}.json"
     seeds = json.loads(seeds_path.read_text())["seeds"]
     clips = set()
     cmds = []
@@ -134,6 +134,7 @@ def main() -> int:
     ap.add_argument("--game", default="e6fba750")
     ap.add_argument("--tag", default="44_60")
     ap.add_argument("--tag2", default="e6players", help="job tag (S3 scoping)")
+    ap.add_argument("--seeds-name", default="seeds", help="seeds file stem: seeds | jerseyseeds")
     ap.add_argument("--fetch", action="store_true")
     ap.add_argument("--i-rotated-creds", action="store_true")
     a = ap.parse_args()
