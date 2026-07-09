@@ -177,8 +177,10 @@ body{background:#111;color:#eee;font-family:sans-serif;margin:10px}
 .b{background:#333;color:#eee;border:1px solid #555;padding:6px 12px;margin:2px;cursor:pointer}
 .active{background:#664}
 </style></head><body>
+<div id="whobar" style="font-size:34px;font-weight:bold;color:#ffdd33;padding:4px 0">
+ ANNOTATING: <span id="who">?</span></div>
 <div>
- <span id="who"></span> | frame <span id="f">0</span>/<span id="n">?</span>
+ frame <span id="f">0</span>/<span id="n">?</span>
  | approved <span id="ap">0</span>
  | keys: <b>a</b>=approve+next &nbsp;<b>&larr;/&rarr;</b>=move &nbsp;<b>Shift+&larr;/&rarr;</b>=&plusmn;10
  &nbsp;<b>Home/End</b>=start/end
