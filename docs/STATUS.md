@@ -82,6 +82,39 @@ position, graded against the human truth.
 
 ---
 
+## Thursday PM — two validations that de-risk production
+
+Two AWS runs answered the two biggest open questions:
+
+**A. Does it work WITHOUT ground truth? (production seeding)** — we re-ran every player seeded
+from an **automatic confident jersey reading** instead of a human box. It works as well or
+better:
+
+| Player | Hand-seeded (GT) | Auto jersey-seeded |
+|---|---|---|
+| #11 | 84% | **86%** |
+| #6 | 69% | **88%** |
+| #43 | 67% | **84%** |
+| #22 (same-kit) | 63% | 64% |
+
+Seeding from a confident number read is **GT-quality or better** — so the production trigger (a
+clear jersey read starts the track) is proven. With jersey seeding, most players now sit at
+**84–88%**; only #22 (the same-kit *and* same-number confuser) lags.
+
+**B. Does it decay over minutes? (duration)** — we tracked #11 over a **full 3 minutes**. It
+does **not** decay:
+
+| Camera | 0–30s | 30–60 | 60–90 | 90–120 | 120–150 | 150–180 |
+|---|---|---|---|---|---|---|
+| **NR** | 96% | 99% | 93% | 100% | 100% | 98% |
+| FR | 100% | 87% | 31% | 84% | 100% | 86% |
+| FL | 63% | 58% | 83% | 100% | 78% | 71% |
+
+The strong camera (NR) held #11 at **93–100% across the entire 3 minutes with zero decline.**
+The dips in FL/FR are the same *spatial* weakness (far-camera drift), not a *time* effect — the
+mask doesn't fall apart as the clip gets longer. The full-game duration concern is largely
+answered.
+
 ## Where this leaves us — honest
 
 - **Detection: solved** (96–100%, verified).
