@@ -145,6 +145,41 @@ The dips in FL/FR are the same *spatial* weakness (far-camera drift), not a *tim
 mask doesn't fall apart as the clip gets longer. The full-game duration concern is largely
 answered.
 
+## Friday — the re-seed layer landed: 68% → 88% strict all-angles
+
+The "re-seed-on-drift" item from the in-progress table below is now **built, run, and
+measured**, and it stacked with the cross-camera correction exactly as designed. Strict
+metric throughout: the player must be correctly shown in **every camera that can see him**
+(the honest per-angle measure), scored leakage-free against operator ground truth.
+
+| Player | Old best (Thu) | Re-seed alone | **Re-seed + cross-camera correction** | ≥1-angle coverage |
+|---|---|---|---|---|
+| #11 | 86% | 78% | **97%** (FL 94, FR 98, NL 96, NR 99) | **100%** |
+| #22 (hardest: same kit + same number) | 53% | 78% | **83%** | 89% |
+| #43 | 57% | 80% | **85%** | 93% |
+| #6 | 76% | 78% | **86%** | 93% |
+| **Mean** | **68%** | 78% | **88%** | 94% |
+
+- How it works: every confident jersey reading becomes a checkpoint; SAM3's track is
+  re-started fresh from each checkpoint (a drift can only survive until the next confident
+  number), then the 4-angle court-map correction overrides any camera that disagrees with
+  the jersey-confirmed position. Two layers, same recipe as before — no new training.
+- Court position error stays 5–12 cm (median).
+- The remaining weak cells (#22 NL 62%, #6 FR 78%, #43 NR 76%) are same-kit steals in
+  pile-ups — the next lever is joint assignment with the full roster tracked (mutual
+  exclusion: a body already claimed by #6 can't also be #22). Engineering for that is the
+  multi-object port below.
+- Files: `runs/sam3_players_reseed/` (masklets), `runs/tracking/ledger/sam3xcam_e6fba750_44_60.json`,
+  scripts `extract_reseed_points.py`, `sam3_track_player.py --reseeds`, `solve_player_xcam.py`.
+
+**Cost control (new standing rule):** no AWS run above **$5** without explicit approval.
+The 59-track roster run and the 4-camera full-game #11 run were terminated mid-flight under
+this rule; the replacement is a **multi-object port** (all players share one SAM3 pass per
+camera) that re-does the roster experiment for ~$2 instead of ~$10 and makes full-game runs
+~10× cheaper. Port in progress.
+
+---
+
 ## Where this leaves us — honest
 
 - **Detection: solved** (96–100%, verified).
@@ -169,10 +204,10 @@ appearance all fail to distinguish him in a pile-up — is the residual.
 
 | Item | What it does | Status |
 |---|---|---|
-| **Re-seed-on-drift loop** | Re-start SAM3's track from a fresh confident number reading the moment the outline slides onto a team-mate — so a mistake can only last the split-second until the next number is seen. Directly targets the #22 residual. | **Building now** |
+| **Re-seed-on-drift loop** | Re-start SAM3's track from a fresh confident number reading the moment the outline slides onto a team-mate — so a mistake can only last the split-second until the next number is seen.  **Building now** | **Building now** |
 | **Masklet-splitting** | Where the number on the outline contradicts who we're tracking, cut it there and re-acquire the right player from the other cameras. Offline, no new compute. | Queued |
 | **Full-game (40-min) validation** | Confirm the 3-minute "no decay" result holds across a whole game with many subs and returns. | Queued |
-| **NL left-basket camera check** | The one physical action: NL under-covers the left basket (likely obstruction/mis-aim). A re-aim there recovers the weakest court zone. | Recommended to client |
+| **NL left-basket camera check** | The one physical action: NL under-covers the left basket (likely obstruction/mis-aim). A re-aim there recovers the weakest court zone. | |
 | **Confirmed/temporary re-ID layer** | For subs / players who leave court and return: track as a "temp" identity by geometry + colour + appearance until a number confirms, then merge retroactively. | Designed ([IDENTITY_REID_DESIGN.md](IDENTITY_REID_DESIGN.md)) |
 
 **What is NOT in the remaining work** (already resolved this week): detection (solved), jersey
@@ -223,7 +258,7 @@ good enough.
 
 ---
 
-## Before / after videos — for the client (old first, then corrected)
+## Before / after videos - (old first, then corrected)
 
 Show the **OLD** clip, then the **NEW** — same player, same minute, visibly steadier.
 
