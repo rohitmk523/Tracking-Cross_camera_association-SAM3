@@ -82,9 +82,39 @@ position, graded against the human truth.
 
 ---
 
+## How the tracking actually works (method, in plain terms)
+
+So the results below are readable, here is the pipeline we built and how each piece works:
+
+1. **Detect** — every frame, every camera, find all players (SAM3 / our detector). Solved.
+2. **Seed one player** — pick a player by a **confident jersey-number reading** ("that's clearly
+   #11") and hand SAM3 *that one box*. This is the industry recipe (single-object), and it is
+   the correction we made on Thursday — previously we asked SAM3 to find everyone at once, which
+   fragments.
+3. **SAM3 follows him** — from that one seed, SAM3 propagates an outline of **that player**
+   across the clip, on its own, in each camera. One clean track per player per camera.
+4. **Fuse the four cameras by court position** — project each camera's outline to a top-down
+   court coordinate and combine them. A player is tracked whenever **any** camera holds him, so
+   when one camera loses him the others carry — one continuous court track.
+5. **Grade against human truth** — we compare, frame by frame, where SAM3 says the player is
+   versus where the operator marked him (13,000 labels). *Leakage-free*: the human labels are
+   only the answer key, never fed back into the track. The one seed frame is the only input; every
+   other frame is a blind test.
+
+The two numbers we report: **coverage** (fraction of frames the fused track is on the right
+player) and **court accuracy** (centimetres between our position and the true position).
+
 ## Thursday PM — two validations that de-risk production
 
-Two AWS runs answered the two biggest open questions:
+Two AWS runs answered the two biggest open questions. **How we ran each:**
+
+- **A (production seeding):** instead of seeding from the human box, we found — for each player,
+  automatically — the earliest frame where the jersey number was read with high confidence, and
+  seeded SAM3 from *that detection*. No ground truth touches the seed. If this matches
+  hand-seeding, the system can run itself.
+- **B (duration):** we pulled a **3-minute** clip (3× longer) and tracked #11 across it, then
+  measured the present-rate in six 30-second buckets — does the outline hold, or slowly fall off
+  the player as the clip runs long?
 
 **A. Does it work WITHOUT ground truth? (production seeding)** — we re-ran every player seeded
 from an **automatic confident jersey reading** instead of a human box. It works as well or
@@ -125,6 +155,30 @@ answered.
 
 The detailed plan to close it — software levers now running, plus camera re-aiming — is in
 **[SOLUTION_PLAN.md](SOLUTION_PLAN.md)**.
+
+---
+
+## What's left to resolve — and what's in progress right now
+
+**The one remaining problem, stated precisely:** a player who is *both* in identical kit to a
+team-mate *and* wears the same number as an opponent (our #22 case) sits at **64%** while every
+other player is now **84–88%**. That single hardest configuration — where colour, number, and
+appearance all fail to distinguish him in a pile-up — is the residual.
+
+**In progress now:**
+
+| Item | What it does | Status |
+|---|---|---|
+| **Re-seed-on-drift loop** | Re-start SAM3's track from a fresh confident number reading the moment the outline slides onto a team-mate — so a mistake can only last the split-second until the next number is seen. Directly targets the #22 residual. | **Building now** |
+| **Masklet-splitting** | Where the number on the outline contradicts who we're tracking, cut it there and re-acquire the right player from the other cameras. Offline, no new compute. | Queued |
+| **Full-game (40-min) validation** | Confirm the 3-minute "no decay" result holds across a whole game with many subs and returns. | Queued |
+| **NL left-basket camera check** | The one physical action: NL under-covers the left basket (likely obstruction/mis-aim). A re-aim there recovers the weakest court zone. | Recommended to client |
+| **Confirmed/temporary re-ID layer** | For subs / players who leave court and return: track as a "temp" identity by geometry + colour + appearance until a number confirms, then merge retroactively. | Designed ([IDENTITY_REID_DESIGN.md](IDENTITY_REID_DESIGN.md)) |
+
+**What is NOT in the remaining work** (already resolved this week): detection (solved), jersey
+OCR quality (fine), production seeding without ground truth (proven), and time-decay over
+minutes (proven not to happen). The remaining effort is narrowly focused on the same-kit /
+same-number identity case — not on the pipeline as a whole.
 
 ---
 
