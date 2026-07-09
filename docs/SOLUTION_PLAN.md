@@ -69,37 +69,38 @@ onto a same-kit team-mate in a pile-up, there is no clean third camera to overri
 Measured blind zones (fraction of player-visible frames each camera cannot see him):
 FL 51%, NL 45%, FR 39%, NR 26% — all concentrated on the **far half** from each camera.
 
-### Re-aim goal: maximise 3-camera overlap in the contested centre + both keys
-Clusters, screens and rebounds — where drift happens — occur in the **middle third and the two
-keys**. Right now those zones sit at the *edge* of each camera's coverage. Concrete moves:
+### What the real-coverage map says (`runs/tracking/camera_real_coverage.jpg`)
+This map counts, per court zone, how many cameras **correctly hold the player** (not just see
+him). Two findings that overturn the naive advice:
 
-1. **Near cameras (NL, NR) — your strongest assets** (lowest blind rates). Pan/tilt them
-   **toward centre court** so their well-covered zone reaches past half-court. This is the
-   highest-value single change: it puts a reliable near-camera view onto the middle where the
-   far cameras are already weak, giving the fusion a clean third angle exactly where same-kit
-   drift occurs.
-2. **Far cameras (FL, FR) — fill the frame with court.** If either is currently spending field
-   of view on crowd/ceiling/floor, re-aim so the court fills the frame — more pixels on
-   far-court players directly improves how long they're held before they shrink out.
-3. **Deliberately overlap, don't tile.** The instinct is to point each camera at a different
-   quarter to "cover everything." The opposite is better here: **aim all four to share the
-   centre third**, accepting that the far corners get 1–2 cameras. Redundancy in the contested
-   middle beats coverage of quiet corners.
-4. **NL specifically** shows catastrophic drop-outs for some players (4–14%) while fine for
-   others — a recurring obstruction in part of its view. Physically check what NL sees across
-   the far half and re-aim around the obstruction.
+1. **The near sideline is the strongest zone (2–3 cameras hold).** NL and NR are doing their
+   essential job — watching under the rims, where FL/FR are too far to tell players apart.
+   **Do not re-aim them toward centre;** that would abandon the one thing only they can do, and
+   the centre isn't even the main gap.
+2. **The real weak zone is the LEFT basket / left third (0.0–0.7 cameras hold) — and it's
+   asymmetric**, much weaker than the right. Only **5 of 26 weak cells are in the centre; 21
+   are at the ends/keys.** The problem is the *ends*, not the middle.
+
+### Concrete, data-driven re-aiming (FL/FR only; leave NL/NR on the rims)
+
+1. **NL — investigate first (your own hypothesis).** NL has catastrophic drop-outs for some
+   players (4–14%) and the left third it should own is the weakest zone on the court. That
+   signals a **recurring obstruction or a mis-aimed view of the left basket area** — a physical
+   check of what NL actually frames on the left is the single highest-value action.
+2. **FL, FR — fill the frame with court.** These are the flexible cameras. If either wastes
+   field of view on crowd/ceiling/floor, re-aim so the court fills the frame — every extra pixel
+   on a far-court player extends how long he's held before he shrinks out. Aim them to reinforce
+   the **weak left/end zones**, not the already-strong near sideline.
+3. **Do not chase the centre.** The centre already gets 1–2 holds; the ends are where coverage
+   collapses to <1. Point FL/FR's attention at the under-covered **keys and corners**.
 
 ### Honest limit of angle-only changes
 Re-aiming **cannot** fix far-baseline resolution — a side camera at fixed height sees a distant
-player as a handful of pixels no matter the angle; only height/position would. So angle changes
-target the **cluster-drift** problem (via centre overlap), which is where losses hurt most, not
-the pure far-distance problem. Expected effect: modest but real — turning 2-camera coverage into
-3-camera coverage in the middle gives the fusion the outvote it currently lacks. Pair this with
-the software levers (jersey re-seed, masklet-split) for the compounding gain.
-
-### Also available at no hardware cost — overhead rim camera framing (future)
-If a shot-analytics upgrade is ever on the table, an overhead rim-axis view per hoop is the
-route to near-certain make/miss — noted for later, not part of the re-aiming pass.
+player as a handful of pixels no matter the angle. Angle changes can recover a **mis-aimed or
+obstructed** camera (likely the case for NL on the left) and squeeze more court into FL/FR's
+frames, but the end/corner gaps are partly bound by where the cameras are mounted. Expected
+effect: fixing NL's left-side view is real and specific; the rest is incremental. The larger,
+more reliable gains are the **software levers** (jersey re-seed, masklet-split) — pair them.
 
 ---
 
