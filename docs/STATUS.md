@@ -90,5 +90,58 @@ position, graded against the human truth.
   every tracker on Earth at this camera count. Not a machinery failure; a genuine limit of
   what four side-angle cameras can see when identical-looking players collide.
 
-The detailed plan to close it — software levers now running, plus a hardware recommendation —
-is in **[SOLUTION_PLAN.md](SOLUTION_PLAN.md)**.
+The detailed plan to close it — software levers now running, plus camera re-aiming — is in
+**[SOLUTION_PLAN.md](SOLUTION_PLAN.md)**.
+
+---
+
+## Where each camera loses the player (blind-zone finding)
+
+We mapped, for every court position, which cameras can see the player and which cannot
+(`runs/tracking/camera_blind_zones.jpg` — green = sees, red = blind).
+
+**The pattern: each camera covers its own half and goes blind on the far half.** A player is
+realistically seen by only **~2 of the 4 cameras at any moment** (the pair on his end).
+Measured blind rates: FL 51%, NL 45%, FR 39%, NR 26%, all concentrated on the far half from
+each camera. This is *why* same-kit drift isn't rescued — when a player's two covering cameras
+both slide onto a team-mate in a pile-up, there's no clean third camera to override them.
+
+**Fix without new cameras:** re-aim the four we have to **overlap more in the centre and both
+keys** (where clusters happen), turning 2-camera coverage into 3-camera coverage where it
+matters — detail and honest limits in SOLUTION_PLAN.md.
+
+## Do we need more detector / jersey-OCR training? — No, both are fine for now
+
+We checked, because it's the natural question. **Neither is the bottleneck.**
+
+- **Detection is solved and needs no more training.** SAM3 finds players **96–100%** of the
+  time; our own detector reads player/referee/ball at 0.90+ accuracy. When we lose a player it
+  is *not* because we failed to detect him — he's detected, then the *identity* slides. More
+  detection data would be low-value right now.
+- **Jersey OCR is strong and needs no more training.** It reads numbers at **94–95% precision**
+  and produces **~4,300–6,200 confident reads per minute**. The reason a number sometimes
+  doesn't help is that it's **physically hidden** (player turned away, buried in a pile-up),
+  not that the OCR misreads it. More OCR training can't read a number the camera can't see.
+
+**Conclusion:** the effort belongs on **identity-through-traffic** (the solvers, jersey
+re-seeding, and camera re-aiming) — not on retraining detection or OCR, which are already
+good enough.
+
+---
+
+## Files & artefacts (this week's deliverables)
+
+| File | What it is |
+|---|---|
+| `docs/STATUS.md` | this report |
+| `docs/SOLUTION_PLAN.md` | software levers + camera re-aiming plan |
+| `docs/IDENTITY_REID_DESIGN.md` | the confirmed/temporary re-ID design |
+| `runs/tracking/camera_blind_zones.jpg` | per-camera blind-zone court map |
+| `runs/tracking/sam3player_ref_1_e6fba750.mp4` | referee tracked (96% — the clean case) |
+| `runs/tracking/sam3player_n11_e6fba750.mp4` | #11 tracked (85%) |
+| `runs/tracking/sam3player_n6_e6fba750.mp4` | #6 tracked (68%) |
+| `runs/tracking/sam3player_n22_e6fba750.mp4` | #22 tracked (63% — same-kit hardest) |
+| `runs/tracking/sam3player_n43_e6fba750.mp4` | #43 tracked (67%) |
+| `runs/tracking/ledger/sam3reid_e6fba750_44_60.json` | single-object + re-ID scores vs ground truth |
+| `runs/tracking/ledger/master_scorecard.jsonl` | every tracking version × player, cross-verified |
+| `data/gt_players/*.json` | the 13,000 human ground-truth labels |

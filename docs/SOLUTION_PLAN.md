@@ -57,49 +57,49 @@ minutes and many events, or decay? Clip pulled; runs after the jersey-seed pass.
 
 ---
 
-## Hardware recommendations
+## Camera re-aiming (no new cameras — re-angle the existing 4)
 
-The measured per-camera data says the four cameras are **not the problem individually — their
-shared geometry is.** Average "held the player" across all five: FR 66%, NR 66%, FL 49%,
-NL 40%, and **no camera is reliably above ~85%** because they all sit at similar low side
-angles and lose clustered players together.
+Constraint: we cannot add cameras, only **re-aim the four we have.** The blind-zone map
+(`runs/tracking/camera_blind_zones.jpg`) shows the exact problem to attack: **each camera
+covers its own half and goes blind on the opposite half** — so a player is realistically
+seen by only **~2 of the 4 cameras at once** (the pair on his end). When those two both slide
+onto a same-kit team-mate in a pile-up, there is no clean third camera to override them. That
+2-camera-deep coverage is the ceiling; re-aiming should raise it toward 3 where it matters.
 
-### Recommendation A — add one overhead centre-court camera  ·  highest impact
-A single camera mounted **directly above centre court, looking straight down**, sees a pile-up
-**from above, where players do not occlude each other.** This breaks the exact failure mode
-that no software fully fixes: correlated same-kit drift in clusters. It is also how the
-category leaders (Hawk-Eye, Second Spectrum, Noah) achieve their accuracy — placement, not
-just algorithms. **One overhead camera would likely move same-kit tracking from ~65% toward
-the 90s**, because the hardest moments (bodies overlapping in side views) become clean from
-directly above.
+Measured blind zones (fraction of player-visible frames each camera cannot see him):
+FL 51%, NL 45%, FR 39%, NR 26% — all concentrated on the **far half** from each camera.
 
-### Recommendation B — raise / re-aim the two far cameras (FL, FR)
-FL in particular swings between 22% and 86% depending on the player — a sign its view is
-partly obstructed or too low, so far-court players fall below or behind foreground bodies.
-Mounting FL/FR **higher, with a steeper downward angle**, flattens the occlusion and steadies
-far-court coverage.
+### Re-aim goal: maximise 3-camera overlap in the contested centre + both keys
+Clusters, screens and rebounds — where drift happens — occur in the **middle third and the two
+keys**. Right now those zones sit at the *edge* of each camera's coverage. Concrete moves:
 
-### Recommendation C — check NL's placement
-NL shows **catastrophic drift for specific players** (4%, 14%) while being fine for others —
-a localised blind spot or a recurring obstruction in its view of one part of the court.
-Worth a physical check of what NL sees where those players spend time.
+1. **Near cameras (NL, NR) — your strongest assets** (lowest blind rates). Pan/tilt them
+   **toward centre court** so their well-covered zone reaches past half-court. This is the
+   highest-value single change: it puts a reliable near-camera view onto the middle where the
+   far cameras are already weak, giving the fusion a clean third angle exactly where same-kit
+   drift occurs.
+2. **Far cameras (FL, FR) — fill the frame with court.** If either is currently spending field
+   of view on crowd/ceiling/floor, re-aim so the court fills the frame — more pixels on
+   far-court players directly improves how long they're held before they shrink out.
+3. **Deliberately overlap, don't tile.** The instinct is to point each camera at a different
+   quarter to "cover everything." The opposite is better here: **aim all four to share the
+   centre third**, accepting that the far corners get 1–2 cameras. Redundancy in the contested
+   middle beats coverage of quiet corners.
+4. **NL specifically** shows catastrophic drop-outs for some players (4–14%) while fine for
+   others — a recurring obstruction in part of its view. Physically check what NL sees across
+   the far half and re-aim around the obstruction.
 
-### Recommendation D (premium) — overhead rim cameras for shot analytics
-Separate from tracking: an **overhead, rim-axis camera per hoop at higher frame rate** turns
-make/miss and shot-arc analytics from inferred to directly measured — the same principle the
-market leader uses, replicable on our low-cost stack (documented separately).
+### Honest limit of angle-only changes
+Re-aiming **cannot** fix far-baseline resolution — a side camera at fixed height sees a distant
+player as a handful of pixels no matter the angle; only height/position would. So angle changes
+target the **cluster-drift** problem (via centre overlap), which is where losses hurt most, not
+the pure far-distance problem. Expected effect: modest but real — turning 2-camera coverage into
+3-camera coverage in the middle gives the fusion the outvote it currently lacks. Pair this with
+the software levers (jersey re-seed, masklet-split) for the compounding gain.
 
-### Cost/impact summary
-| Change | Effort | Expected effect |
-|---|---|---|
-| **A. 1 overhead centre camera** | 1 camera + mount + re-calibration | **Same-kit tracking ~65% → 90s** (breaks cluster occlusion) |
-| B. Raise/re-aim FL, FR | re-mount + re-calibration, no new hardware | Steadier far-court coverage |
-| C. Inspect/adjust NL | physical check | Fixes localised drop-outs |
-| D. Overhead rim cameras | 2 cameras, higher fps | Near-certain make/miss + shot metrics |
-
-**Bottom line on hardware:** software will keep pushing same-kit identity up from 65%, but the
-clean, durable fix is **one overhead camera** — it changes what the system can *see*, and the
-occlusion that defeats every algorithm simply isn't there from above.
+### Also available at no hardware cost — overhead rim camera framing (future)
+If a shot-analytics upgrade is ever on the table, an overhead rim-axis view per hoop is the
+route to near-certain make/miss — noted for later, not part of the re-aiming pass.
 
 ---
 
