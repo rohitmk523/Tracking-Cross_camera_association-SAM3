@@ -262,17 +262,18 @@ good enough.
 
 Show the **OLD** clip, then the **NEW** — same player, same minute, visibly steadier.
 
-| Player | OLD video (first approach) | NEW video (corrected) | Coverage |
-|---|---|---|---|
-| #6 | `sam3player_n6_e6fba750.mp4` | `sam3player_n6_jerseyseed_e6fba750.mp4` | 69% → **88%** |
-| #43 | `sam3player_n43_e6fba750.mp4` | `sam3player_n43_jerseyseed_e6fba750.mp4` | 67% → **84%** |
-| #11 | `sam3player_n11_e6fba750.mp4` | `sam3player_n11_jerseyseed_e6fba750.mp4` | 84% → **86%** |
-| #22 | `sam3player_n22_e6fba750.mp4` | `sam3player_n22_jerseyseed_e6fba750.mp4` | 63% → 64% (residual) |
-| Referee | `sam3player_ref_1_e6fba750.mp4` | *(unchanged — already 96%)* | 96% |
-| #11 · 3-min duration | — | `sam3player_n11_3min_e6fba750.mp4` | holds all 3 min, no decay |
+| Player | OLD video (first approach) | NEW video (corrected) | **FINAL video (re-seed + correction)** | Strict all-angles |
+|---|---|---|---|---|
+| #6 | `sam3player_n6_e6fba750.mp4` | `sam3player_n6_jerseyseed_e6fba750.mp4` | `sam3player_n6_final88_e6fba750.mp4` | 76% → **86%** |
+| #43 | `sam3player_n43_e6fba750.mp4` | `sam3player_n43_jerseyseed_e6fba750.mp4` | `sam3player_n43_final88_e6fba750.mp4` | 57% → **85%** |
+| #11 | `sam3player_n11_e6fba750.mp4` | `sam3player_n11_jerseyseed_e6fba750.mp4` | `sam3player_n11_final88_e6fba750.mp4` | 86% → **97%** |
+| #22 | `sam3player_n22_e6fba750.mp4` | `sam3player_n22_jerseyseed_e6fba750.mp4` | `sam3player_n22_final88_e6fba750.mp4` | 53% → **83%** |
+| Referee | `sam3player_ref_1_e6fba750.mp4` | *(unchanged — already 96%)* | | 96% |
+| #11 · 3-min duration | — | `sam3player_n11_3min_e6fba750.mp4` | | holds all 3 min, no decay |
 
-The OLD videos are kept intact; NEW videos carry the `_jerseyseed` suffix. A further-corrected
-set (re-seed-on-drift, targeting #22) is rendering after that AWS run lands.
+Three generations, all kept intact: OLD (no suffix), `_jerseyseed` (production seeding), and
+`_final88` (re-seed-on-drift + cross-camera correction — the 88%-mean system from the Friday
+section). Show them in order: each generation is visibly steadier than the last.
 
 ## Files & artefacts (this week's deliverables)
 
