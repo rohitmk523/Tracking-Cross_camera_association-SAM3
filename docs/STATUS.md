@@ -180,6 +180,38 @@ camera) that re-does the roster experiment for ~$2 instead of ~$10 and makes ful
 
 ---
 
+## Friday PM — the SAM3-free pipeline (pose + appearance), measured
+
+SAM3 was retired on cost grounds (0.65 fps ≈ $25+/game). The replacement stack was
+built and measured the same day, all on local hardware, $0 compute:
+
+| Layer added | Strict all-angles (mean, 4 GT players) |
+|---|---|
+| Hybrid tracker (ByteTrack + jersey claims + correction) | 77.6% |
+| + KPR appearance tie-break in pile-ups | 78.5% |
+| + coverage fixes (longer interpolation, fallback gate) | **80.6%** |
+| *(retired SAM3 pipeline, reference)* | *88%* |
+
+Per player: #11 91%, #6 85%, #22 74%, #43 73%.
+
+- **Pose layer (RTMPose)**: keypoints for every detection, 161 crops/s on Apple silicon;
+  ankle-sole projection cuts cross-camera position disagreement 63→48cm (−23%).
+- **Appearance layer (KPR, ECCV 2024)**: identifies same-kit teammates in pile-up crops
+  at 69% (chance 33%), zero-shot. Used to break ties when two bodies sit in the gate.
+  *License note: Hippocratic HL3 — needs a commercial-use check before shipping.*
+- **Error decomposition** (the day's key finding): 60% of remaining misses are frames
+  where the system shows NOTHING (long unanchored stretches for sparse-read players),
+  not wrong identities. The next levers target exactly that: appearance-based
+  re-acquisition after long absences, and fine-tuning KPR on our own jersey-confirmed
+  crops (it currently runs zero-shot).
+- Refuted en route (so we don't revisit): gate tightening, joint mutual-exclusion
+  assignment (3 variants), segment-level vote aggregation, GSI short-gap filling.
+
+Projected production cost of this stack: **~$4–8 per game** (detection + OCR + pose
++ KPR on ambiguous crops only), no SAM3 anywhere.
+
+---
+
 ## Where this leaves us — honest
 
 - **Detection: solved** (96–100%, verified).
