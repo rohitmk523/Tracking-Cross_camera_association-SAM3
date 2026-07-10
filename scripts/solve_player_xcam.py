@@ -64,7 +64,8 @@ def main() -> int:
     from uball_cc.fusion.homography import load_calib, project_pixels
 
     key = f"{a.game}_{a.tag}"
-    offs = OFFS[key]
+    offs = OFFS.get(key) or json.loads(
+        (REPO / f"runs/anchors/{key}.jersey_anchors.json").read_text())["offsets"]
     calib = {ang: load_calib(str(REPO / f"configs/calib/{ang}.json")) for ang in ANGLES}
     dets = {}
     pose_by = {ang: defaultdict(list) for ang in ANGLES}   # cf -> [(box, kpts, kscores)]
