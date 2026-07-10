@@ -41,7 +41,7 @@ for P in /opt/pytorch/bin/python /usr/bin/python3; do
 done
 [ -z "$PYBIN" ] && PYBIN=/usr/bin/python3
 TV=$($PYBIN -c "import torch;print(torch.__version__.split('+')[0])")
-$PYBIN -m pip install -q "torch==$TV" rfdetr supervision trackers opencv-python-headless timm ultralytics 2>&1 | tail -1
+$PYBIN -m pip install -q "torch==$TV" rfdetr supervision trackers opencv-python-headless timm ultralytics pytorch-lightning nltk 2>&1 | tail -1
 $PYBIN -m pip uninstall -q -y torchaudio 2>/dev/null || true
 which ffmpeg || (apt-get update -qq && apt-get install -y -qq ffmpeg)
 $PYBIN -c "import torch; assert torch.cuda.is_available(); print('torch OK')"
