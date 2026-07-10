@@ -203,15 +203,41 @@ top-down court view — the system already holds players 89–100% of the time.
    appearance re-acquisition + the next jersey read restore identity.
 6. **Grade** (during development): compare every frame against operator truth.
 
-## Appendix B — Camera findings
+## Appendix B — Camera findings and venue recommendations
 
-- Each camera reliably covers its own half and is nearly blind past centre court;
-  the four together cover everything except two weak zones at the court ends.
-- Real held-coverage maps: `runs/tracking/camera_blind_zones.jpg`,
-  `runs/tracking/camera_real_coverage.jpg`.
-- Recommended action: physical check of the near-left camera (left-basket
-  under-coverage). Re-aiming the two far cameras to fill the frame helps the far
-  thirds. Nothing else about the hardware needs to change.
+**Where the CURRENT pipeline fails, on the court** (new heatmap, both games, 7
+ground-truthed players, strict standard): `runs/tracking/pipeline_failure_heatmap.jpg`
+— green = held, red = lost, per 1.5m court cell.
+
+The picture is consistent and actionable:
+- **Centre court is solid** — 70–90%+ hold-rate through the middle where at least two
+  cameras see every player at readable size.
+- **Failures concentrate at the edges**: the baselines, the corners, and the court
+  ends. These are exactly the zones where (a) players appear smallest — far from the
+  near cameras — and (b) jersey numbers become too small to read, so identity
+  checkpoints stop firing. It is not a software blind spot; it is a *legibility*
+  blind spot.
+- Older SAM3-era maps for comparison: `runs/tracking/camera_blind_zones.jpg`,
+  `runs/tracking/camera_real_coverage.jpg` (same edge pattern — the weakness is
+  physical, not algorithm-specific).
+
+**Venue recommendations, in order of impact per effort:**
+
+1. **Bigger jersey numbers (highest-leverage change available).** Every accuracy
+   layer in this system feeds on confident number reads: identity checkpoints,
+   drift correction, re-acquisition, and the auto-labels that train the recognition
+   model. Today a number is readable only when the player stands ~90+ pixels tall —
+   roughly the near half of the court per camera. **Doubling the number size makes
+   numbers legible at roughly half the player height**, which unlocks reads across
+   most of the red zones in the heatmap, densifies checkpoints everywhere, speeds up
+   re-acquisition after subs and scrums, and generates more training data per game.
+   One kit change, every layer improves.
+2. **Physical check of the near-left camera** — it under-covers the left-basket area
+   (suspected mount/obstruction issue).
+3. **Re-aim the two far cameras** to fill their frames toward the court ends —
+   recovers part of the corner/baseline red zones optically.
+4. No new cameras required for the current accuracy targets; camera *density* only
+   becomes the binding constraint past ~90% strict (see honest ceiling).
 
 ## Appendix C — Files & artefacts
 
@@ -223,5 +249,6 @@ top-down court view — the system already holds players 89–100% of the time.
 | `sam3player_n{11,22,43,6}_final88_e6fba750.mp4` | SAM3-pipeline demos (88% mean) |
 | `sam3player_n{11,22,43,6}_sam3free_e6fba750.mp4` | production-pipeline demos (82.3% mean) |
 | `sam3player_n11_3min_e6fba750.mp4` | 3-minute duration proof (no decay) |
+| `runs/tracking/pipeline_failure_heatmap.jpg` | where the current pipeline loses players (court heatmap) |
 | `runs/tracking/ledger/` | every experiment's scored result (the honesty trail) |
 | `data/kpr_finetune/` | 3,061 auto-labelled crops for the recognition fine-tune |
