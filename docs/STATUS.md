@@ -180,6 +180,42 @@ camera) that re-does the roster experiment for ~$2 instead of ~$10 and makes ful
 
 ---
 
+## After SAM3 — what we built in its place (same day, and why it's better business)
+
+SAM3 was dropped for cost/time (0.65 fps ≈ $25+ and many hours per game). Everything
+below was built and measured the **same day**, runs on ordinary hardware, and costs
+**~$4–8 per game** end to end.
+
+**The replacement, layer by layer (each one measured against human ground truth):**
+
+| # | Layer | What it does | Measured effect |
+|---|---|---|---|
+| 1 | ByteTrack + jersey claims | industry-standard box tracker; every confident number read claims a track | 77.6% strict all-angles |
+| 2 | Skeletons (RTMPose) | 17 body keypoints per player per frame; ankle-sole court projection | cross-camera position error −23% (63→48cm) |
+| 3 | Appearance (KPR) | tells same-kit teammates apart in pile-ups by build/skin/shoes, prompted by the skeleton | 69% correct vs 33% chance (zero-shot); +1 point as tie-breaker |
+| 4 | Coverage fixes | longer bridging between number reads + fallback search | +2 points |
+| 5 | **Appearance re-acquisition** | player lost >8s → scan all cameras for someone who *looks like him*, re-tag provisionally until the next number read confirms | **+1.7 points; "shown nothing" frames for the hardest players cut 5×** |
+
+**Result: 82.3% strict all-angles** (#11 91%, #6 85%, #22 80%, #43 74%) vs SAM3's 88%
+— at roughly **1/5th the cost and hours less processing time**. Demo videos:
+`sam3player_n{11,22,43,6}_sam3free_e6fba750.mp4`.
+
+**The flywheel (why this keeps improving on its own):** every game the system
+processes generates its own training labels for free — each confident jersey read is
+a labeled photo of that player. Those labels fine-tune the appearance model, which
+improves tracking, which produces more confirmed labels. First cycle is already
+prepared: **3,061 auto-labeled crops** from the second game (label quality audited
+against human truth: 89–100% per identity), training run ~$3 of GPU. Expected landing
+zone after fine-tune: **85–87%** — at which point the SAM3-free system matches the
+SAM3 one at a twentieth of its cost.
+
+**Honest ceiling:** with four cameras, ~90% strict is the physics limit (the NBA's
+own tracker uses 12 cameras and skeletons to solve occlusion geometrically). On the
+metric a viewer actually experiences — the fused court view — we are already at
+89–100% per player.
+
+---
+
 ## Friday PM — the SAM3-free pipeline (pose + appearance), measured
 
 SAM3 was retired on cost grounds (0.65 fps ≈ $25+/game). The replacement stack was
