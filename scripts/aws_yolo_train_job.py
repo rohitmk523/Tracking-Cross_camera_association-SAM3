@@ -51,14 +51,15 @@ sed -i "s|^path:.*|path: /work/detect_consolidated|" detect_consolidated/data.ya
    B=$(ls runs/{model}-1280-ourdata-v1/weights/best.pt 2>/dev/null)
    if [ -n "$B" ]; then tar czf results.tar.gz runs; curl -sS -o /dev/null -T results.tar.gz "{results_url}" || true; fi
 done) &
-$PYBIN -m ultralytics.cfg 2>/dev/null || true
-yolo detect train \\
-  data=/work/detect_consolidated/data.yaml \\
-  model={model}.pt imgsz=1280 epochs=100 batch=-1 \\
-  cos_lr=True patience=25 cache=disk mosaic=0.5 close_mosaic=15 copy_paste=0.0 \\
-  project=runs name={model}-1280-ourdata-v1 exist_ok=True; RC=$?
-yolo val model=runs/{model}-1280-ourdata-v1/weights/best.pt \\
-  data=/work/detect_consolidated/data.yaml imgsz=1280 split=test || true
+$PYBIN - <<'PY'; RC=$?
+from ultralytics import YOLO
+m = YOLO("{model}.pt")
+m.train(data="/work/detect_consolidated/data.yaml", imgsz=1280, epochs=100, batch=-1,
+        cos_lr=True, patience=25, cache="disk", mosaic=0.5, close_mosaic=15,
+        copy_paste=0.0, project="runs", name="{model}-1280-ourdata-v1", exist_ok=True)
+best = YOLO("runs/{model}-1280-ourdata-v1/weights/best.pt")
+best.val(data="/work/detect_consolidated/data.yaml", imgsz=1280, split="test")
+PY
 tar czf results.tar.gz runs
 CODE=$(curl -sS --max-time 1800 -w '%{{http_code}}' -o /dev/null -T results.tar.gz "{results_url}")
 echo "[boot] results upload http=$CODE rc=$RC"
