@@ -165,11 +165,18 @@ all four views, positioned on the court map via the 2D→3D projection, and carr
 through subs, scrums and re-entries — one video of the full system running end to
 end, not per-player runs stitched together.
 
+**Second-game blind validation — PASSED.** The same pipeline, run on a game it was
+never tuned on, scores **81% strict all-angles** against that game's own human truth
+(vs 83.2% on the tuned game) — generalization within ~2 points. Two findings along
+the way, both fixed: the earlier collapse on this game was a camera **sync-offset
+constant** (5 frames wrong → 4.5m of phantom cross-camera error; corrected to 0.77m,
+validated against truth), not calibration; and **team-aware identity** (number × kit
+colour) now separates opponents who wear the same number — the two #3s went from
+47%/64% (mixed as one identity) to **73%/86%** tracked as two people. Blind-game
+whole-pipeline demo: `demo_allplayers_c2a354fe.mp4` (8 identities, both #3s held
+side by side).
+
 **Also queued:**
-- **Second-game blind validation** — the same pipeline scored on a game it was never
-  tuned on (its court calibration needs refitting first; the first attempt showed
-  position errors of 1.5–3m against 5–12cm on the tuned game, which is a calibration
-  problem, not a tracking one).
 - **Physical camera check** — the near-left camera under-covers the left basket
   (likely mount/obstruction); a re-aim there is free accuracy. No new cameras needed.
 - **License clearance** — the KPR model ships under the Hippocratic License (HL3);
