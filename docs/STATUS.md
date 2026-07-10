@@ -254,7 +254,10 @@ What that means, honestly:
   ball**. Detection quality is entirely a training-data question, and our labelled
   dataset (below) transfers to any detector. One caveat to weigh: recent Ultralytics
   YOLO versions carry an AGPL/commercial licence, versus RF-DETR's permissive
-  Apache-2.0 — a business decision, not a technical one.
+  Apache-2.0 — a business decision, not a technical one. A full train-and-race plan
+  (YOLO small + medium vs the FP16-optimized RF-DETR: accuracy gates, speed lanes,
+  decision rule, ~$10 total) is written up in
+  `Training_frameworks/Uball 4Cam Detection/YOLO_TRAINING_PLAN.md`.
 
 **Ball detection & possession — separate workstream, groundwork laid.** The
 detection dataset already includes the ball as a first-class label (~1,580 ball
