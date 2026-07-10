@@ -34,9 +34,11 @@ ZONE = {"FL": 0.6, "FR": 0.6, "NL": 1.0, "NR": 1.0}
 GAME, TAG = "e6fba750", "44_60"
 KEY = f"{GAME}_{TAG}"
 PLAYERS = {"#11": 11, "#22": 22, "#43": 43, "#6": 6}
-SAM3_DIR = "runs/hybrid_e6"                 # SAM3-free track streams
-GATE_CM = 180.0
-MAX_INTERP = 150
+import os as _os
+SAM3_DIR = _os.environ.get("SAM3_DIR", "runs/hybrid_e6")                 # SAM3-free track streams
+GATE_CM = float(_os.environ.get("GATE_CM", 180.0))
+MAX_INTERP = int(_os.environ.get("MAX_INTERP", 150))
+SOFT_GATE = float(_os.environ.get("SOFT_GATE", 0))   # fallback: nearest within this if none in gate
 MIN_H = 90
 GALLERY_N = 12
 W_D = 0.3                                   # court-distance weight in the tie-break
@@ -306,8 +308,9 @@ def main() -> int:
         frames, sel = frames_by_pl[pl]
         tr = truth_by_pl[pl]
         sam = sam_by_pl[pl]
-        chosen = {"base": {}, "kpr": {}}
+        chosen = {"base": {}, "kpr": {}, "kprseg": {}}
         n_ties = n_flipped = 0
+        seg_cand = defaultdict(list)   # (ang) -> [(f, [(di,b,d,kd), ...])] for segment pass
         for f in frames:
             tp = tr.get(f)
             for ang in ANGLES:
@@ -331,6 +334,11 @@ def main() -> int:
                     if sr:
                         for m in chosen:
                             chosen[m][(ang, f)] = sr["box"]
+                    elif SOFT_GATE > 0 and cands_all:
+                        di_s, b_s, d_s = min(cands_all, key=lambda x: x[2])
+                        if d_s <= SOFT_GATE:
+                            for m in chosen:
+                                chosen[m][(ang, f)] = b_s
                     continue
                 nearest = min(in_gate, key=lambda x: x[2])
                 chosen["base"][(ang, f)] = nearest[1]
@@ -348,10 +356,68 @@ def main() -> int:
                         if best[1] != nearest[0]:
                             n_flipped += 1
                         pick = (best[1], best[2], best[3])
+                        seg_cand[ang].append((f, [(di2, b2, d2, sc - W_D * d2 / GATE_CM)
+                                                  for sc, di2, b2, d2 in scored]))
                 chosen["kpr"][(ang, f)] = pick[1]
+                chosen["kprseg"][(ang, f)] = pick[1]   # overwritten below where a segment decides
 
-        row = {"ties": n_ties, "flipped": n_flipped}
-        for m in ("base", "kpr"):
+        # ---- segment-level voting: one decision per contiguous tie run ----
+        n_segs = 0
+        for ang, entries in seg_cand.items():
+            entries.sort()
+            groups, cur = [], [entries[0]]
+            for e in entries[1:]:
+                if e[0] - cur[-1][0] <= 5:
+                    cur.append(e)
+                else:
+                    groups.append(cur); cur = [e]
+            groups.append(cur)
+            for grp in groups:
+                if len(grp) < 3:
+                    continue                      # too short to aggregate; keep frame picks
+                n_segs += 1
+                chains = []                        # {"last": box, "frames": {f: box}, "kds": [], "ds": []}
+                for f, cands in grp:
+                    for di, b, d, kd in cands:
+                        best_c, best_v = None, 0.4
+                        for c in chains:
+                            v = iou(c["last"], b)
+                            if v > best_v:
+                                best_c, best_v = c, v
+                        if best_c is None:
+                            chains.append({"last": b, "frames": {f: b}, "kds": [kd], "ds": [d]})
+                        else:
+                            best_c["last"] = b
+                            best_c["frames"][f] = b
+                            best_c["kds"].append(kd); best_c["ds"].append(d)
+                cov = max(len(c["frames"]) for c in chains)
+                elig = [c for c in chains if len(c["frames"]) >= max(3, 0.3 * len(grp))]
+                if not elig:
+                    continue
+                win = min(elig, key=lambda c: np.mean(c["kds"]) + W_D * np.mean(c["ds"]) / GATE_CM)
+                for f, _ in grp:
+                    if f in win["frames"]:
+                        chosen["kprseg"][(ang, f)] = win["frames"][f]
+
+        # error decomposition for base mode: no-pick vs wrong-pick
+        n_none = n_wrong = n_vis = 0
+        for f in frames:
+            for ang in ANGLES:
+                if ang not in sel[f]:
+                    continue
+                cf = f + OFFS[ang]
+                gb = [b for _, b in dets[ang].get(cf, [])]
+                if sel[f][ang] >= len(gb):
+                    continue
+                n_vis += 1
+                cb = chosen["base"].get((ang, f))
+                if cb is None:
+                    n_none += 1
+                elif iou(gb[sel[f][ang]], cb) < IOU_HIT:
+                    n_wrong += 1
+        row = {"ties": n_ties, "flipped": n_flipped, "segments": n_segs,
+               "err_none": n_none, "err_wrong": n_wrong, "n_vis": n_vis}
+        for m in ("base", "kpr", "kprseg"):
             pc = {}
             for ang in ANGLES:
                 nv = nh = 0
@@ -371,12 +437,15 @@ def main() -> int:
             row[m] = {"per_cam": {k: round(v, 3) for k, v in pc.items()},
                       "all_angles": round(sum(pc.values()) / len(pc), 3) if pc else None}
         report[pl] = row
-        print(f"{pl}: ties {n_ties}, KPR flipped {n_flipped} | "
-              f"base {row['base']['all_angles']:.0%} -> KPR {row['kpr']['all_angles']:.0%}")
+        print(f"{pl}: MISSES: no-pick {row['err_none']} vs wrong-pick {row['err_wrong']} of {row['n_vis']} vis")
+        print(f"{pl}: ties {n_ties}, flips {n_flipped}, segments {row['segments']} | "
+              f"base {row['base']['all_angles']:.0%} -> KPR {row['kpr']['all_angles']:.0%} "
+              f"-> KPR-SEG {row['kprseg']['all_angles']:.0%}")
 
-    means = {m: np.mean([r[m]["all_angles"] for r in report.values()]) for m in ("base", "kpr")}
-    print(f"\nMEAN strict all-angles: base {means['base']:.1%} -> KPR-assisted {means['kpr']:.1%}"
-          f"   [SAM3+xcam was 88%]")
+    means = {m: np.mean([r[m]["all_angles"] for r in report.values()])
+             for m in ("base", "kpr", "kprseg")}
+    print(f"\nMEAN strict all-angles: base {means['base']:.1%} -> frame-KPR {means['kpr']:.1%} "
+          f"-> SEGMENT-KPR {means['kprseg']:.1%}   [SAM3+xcam was 88%]")
     (REPO / f"runs/tracking/ledger/kprxcam_{KEY}.json").write_text(json.dumps(
         {"window": KEY, "method": "hybrid xcam + KPR tie-break (no SAM3)",
          "players": report, "mean": {m: round(float(v), 3) for m, v in means.items()}}, indent=1))
