@@ -1,0 +1,387 @@
+#!/usr/bin/env python3
+"""KPR-assisted cross-camera correction: appearance breaks pile-up ties.
+
+The xcam correction picks the detection NEAREST the interpolated truth. In pile-ups
+several bodies sit inside the gate and nearest-wins grabs teammates (the 78->88 gap).
+Here, whenever >=2 candidates are in the gate, KPR part-based appearance (prompted
+with RTMPose keypoints) votes: score = kpr_distance + w_d * court_dist / gate.
+
+Production-real: galleries are built from jersey-CONFIRMED crops (confident read
+attached to a detection), NOT from GT. GT only grades the output. Memory-bounded:
+batch-8 inference, LRU frame cache (30), embeddings streamed to disk first.
+
+Run with the KPR env:  /tmp/kpr/.venv310/bin/python scripts/kpr_assist_xcam.py
+"""
+from __future__ import annotations
+
+import json
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+import cv2
+import numpy as np
+
+REPO = Path(__file__).resolve().parents[1]
+KPR = Path("/tmp/kpr")
+sys.path.insert(0, str(KPR))
+sys.path.insert(0, str(REPO / "src"))
+sys.path.insert(0, str(REPO / "scripts"))
+
+ANGLES = ("FL", "FR", "NL", "NR")
+OFFS = {"FL": 0, "FR": -11, "NL": -1, "NR": -1}
+ZONE = {"FL": 0.6, "FR": 0.6, "NL": 1.0, "NR": 1.0}
+GAME, TAG = "e6fba750", "44_60"
+KEY = f"{GAME}_{TAG}"
+PLAYERS = {"#11": 11, "#22": 22, "#43": 43, "#6": 6}
+SAM3_DIR = "runs/hybrid_e6"                 # SAM3-free track streams
+GATE_CM = 180.0
+MAX_INTERP = 150
+MIN_H = 90
+GALLERY_N = 12
+W_D = 0.3                                   # court-distance weight in the tie-break
+IOU_HIT = 0.3
+EMB_CACHE = REPO / f"runs/pose_cache/{KEY}.kpr_embs.npz"
+
+
+def iou(a, b):
+    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
+    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    if inter <= 0:
+        return 0.0
+    return inter / ((a[2]-a[0])*(a[3]-a[1]) + (b[2]-b[0])*(b[3]-b[1]) - inter)
+
+
+def main() -> int:
+    from kpr_pilot import restricted_torch_load
+    import os
+    import torch
+
+    # ---------- data ----------
+    dets, pose_by = {}, {}
+    for ang in ANGLES:
+        z = np.load(REPO / f"runs/dets_cache/{GAME}_{ang}_{TAG}_small_1280_t0.25.dets.npz")
+        m = defaultdict(list)
+        for di, (b, c, f) in enumerate(zip(z["boxes"], z["classes"], z["frame_idx"])):
+            if int(c) in (0, 1):
+                m[int(f)].append((di, [float(v) for v in b]))
+        dets[ang] = m
+        p = np.load(REPO / f"runs/pose_cache/{GAME}_{ang}_{TAG}.pose.npz")
+        pose_by[ang] = {(int(f), int(d)): (k, s) for f, d, k, s in
+                        zip(p["frame_idx"], p["det_idx"], p["kpts"], p["kscores"])}
+    anchors = defaultdict(list)
+    for ev in json.loads((REPO / f"runs/anchors/{KEY}.jersey_anchors.json").read_text())["anchors"]:
+        anchors[(ev["cam"], ev["frame"])].append((ev["box"], int(ev["number"]), ev.get("conf", 1.0)))
+    gt = json.loads((REPO / f"data/gt_players/{KEY}.json").read_text())
+
+    from uball_cc.fusion.homography import load_calib, project_pixels
+    calib = {ang: load_calib(str(REPO / f"configs/calib/{ang}.json")) for ang in ANGLES}
+
+    def court(ang, box):
+        (x, y), = project_pixels([((box[0] + box[2]) / 2, box[3])], calib[ang])
+        return np.array([x, y])
+
+    # ---------- per-player track streams + truth (same recipe as solve_player_xcam) ----------
+    sam_by_pl, truth_by_pl, frames_by_pl = {}, {}, {}
+    for pl, num in PLAYERS.items():
+        safe = pl.replace("#", "n")
+        sam = {}
+        for ang in ANGLES:
+            p = REPO / SAM3_DIR / f"{KEY}__{safe}__{ang}.json"
+            if p.exists():
+                sam[ang] = {int(f): r for f, r in json.loads(p.read_text())["frames"].items()
+                            if r.get("present") and r.get("box")}
+        sam_by_pl[pl] = sam
+        sel = {int(f): s for f, s in gt[pl]["frames"].items() if s and str(f) in gt[pl].get("approved", {})}
+        frames = sorted(sel)
+        frames_by_pl[pl] = (frames, sel)
+        anchor_pos = {}
+        for f in frames:
+            pts, ws = [], []
+            for ang in ANGLES:
+                sr = sam.get(ang, {}).get(f + OFFS[ang])
+                if not sr:
+                    continue
+                for abox, anum, aconf in anchors.get((ang, f), []):
+                    if anum == num and iou(sr["box"], abox) >= 0.3:
+                        pts.append(court(ang, sr["box"])); ws.append(ZONE[ang] * aconf)
+                        break
+            if pts:
+                anchor_pos[f] = np.average(pts, axis=0, weights=ws)
+        tr = dict(anchor_pos)
+        ak = sorted(anchor_pos)
+        for a0, a1 in zip(ak, ak[1:]):
+            g = a1 - a0
+            if 1 < g <= MAX_INTERP:
+                for f in range(a0 + 1, a1):
+                    tr[f] = anchor_pos[a0] + (anchor_pos[a1] - anchor_pos[a0]) * ((f - a0) / g)
+        truth_by_pl[pl] = tr
+
+    # ---------- collect crops needing embeddings ----------
+    # galleries: jersey-CONFIRMED detections (production identity, no GT)
+    gal_specs = {pl: [] for pl in PLAYERS}          # (ang, cf, di, box)
+    for (ang, f), evs in anchors.items():
+        for abox, anum, aconf in evs:
+            pl = next((p for p, n in PLAYERS.items() if n == anum), None)
+            if pl is None or aconf < 0.95:
+                continue
+            cf = f + OFFS[ang]
+            for di, b in dets[ang].get(cf, []):
+                if iou(b, abox) >= 0.6 and b[3] - b[1] >= MIN_H:
+                    gal_specs[pl].append((ang, cf, di, tuple(b)))
+                    break
+    rng = np.random.RandomState(0)
+    for pl in gal_specs:
+        gs = gal_specs[pl]
+        gal_specs[pl] = [gs[i] for i in rng.choice(len(gs), min(GALLERY_N, len(gs)), replace=False)]
+
+    # ambiguous instances: >=2 candidates in gate at a truth frame
+    amb = []                                        # (pl, ang, f, [(di, box, dist_cm), ...])
+    for pl in PLAYERS:
+        frames, sel = frames_by_pl[pl]
+        tr = truth_by_pl[pl]
+        for f in frames:
+            tp = tr.get(f)
+            if tp is None:
+                continue
+            is_anchor_f = False
+            for ang in ANGLES:
+                cf = f + OFFS[ang]
+                sr = sam_by_pl[pl].get(ang, {}).get(cf)
+                if sr and any(anum == PLAYERS[pl] and iou(sr["box"], abox) >= 0.3
+                              for abox, anum, _ in anchors.get((ang, f), [])):
+                    is_anchor_f = True
+            for ang in ANGLES:
+                cf = f + OFFS[ang]
+                cands = []
+                for di, b in dets[ang].get(cf, []):
+                    d = float(np.linalg.norm(court(ang, b) - tp))
+                    if d <= GATE_CM and b[3] - b[1] >= MIN_H:
+                        cands.append((di, b, d))
+                if len(cands) >= 2:
+                    ds = sorted(c[2] for c in cands)
+                    if ds[1] - ds[0] < 60.0:       # genuine tie only: runner-up within 60cm
+                        amb.append((pl, ang, f, cands))
+    n_crops = len({(ang, f + OFFS[ang], di) for pl, ang, f, cs in amb for di, _, _ in cs})
+    print(f"galleries: { {p: len(g) for p, g in gal_specs.items()} } | "
+          f"ambiguous instances: {len(amb)} | unique candidate crops: {n_crops}")
+
+    # ---------- embeddings (streamed, batch 8, LRU frames) ----------
+    need = {}                                       # (ang, cf, di) -> box
+    for pl, specs in gal_specs.items():
+        for ang, cf, di, box in specs:
+            need[(ang, cf, di)] = list(box)
+    for pl, ang, f, cands in amb:
+        for di, b, _ in cands:
+            need[(ang, f + OFFS[ang], di)] = b
+
+    if EMB_CACHE.exists():
+        zc = np.load(EMB_CACHE, allow_pickle=True)
+        emb_map = {tuple(k): (e, v) for k, e, v in zip(zc["keys"], zc["embs"], zc["vis"])}
+        missing = [k for k in need if k not in emb_map]
+    else:
+        emb_map, missing = {}, list(need)
+    print(f"embeddings: {len(emb_map)} cached, {len(missing)} to compute")
+
+    if missing:
+        _orig = torch.load
+        torch.load = restricted_torch_load()
+        from torchreid.scripts.builder import build_config
+        from torchreid.tools.feature_extractor import KPRFeatureExtractor
+        cwd = os.getcwd()
+        os.chdir(KPR)
+        try:
+            cfg = build_config(config_path=str(KPR / "configs/kpr/imagenet/kpr_occ_posetrack_test.yaml"))
+            cfg.use_gpu = False
+            cfg.test.batch_size = 8
+            extractor = KPRFeatureExtractor(cfg)
+        finally:
+            os.chdir(cwd)
+            torch.load = _orig
+
+        caps = {ang: cv2.VideoCapture(str(REPO / f"data/clips/{GAME}_{ang}_{TAG}.mp4")) for ang in ANGLES}
+        cache = {}
+
+        def read_frame(ang, cf):
+            if (ang, cf) not in cache:
+                caps[ang].set(cv2.CAP_PROP_POS_FRAMES, cf)
+                ok, img = caps[ang].read()
+                cache[(ang, cf)] = img if ok else None
+                if len(cache) > 30:
+                    cache.pop(next(iter(cache)))
+            return cache[(ang, cf)]
+
+        def build_sample(ang, cf, di, box):
+            img = read_frame(ang, cf)
+            if img is None:
+                return None
+            ih, iw = img.shape[:2]
+            x1, y1 = max(0, int(box[0])), max(0, int(box[1]))
+            x2, y2 = min(iw, int(box[2])), min(ih, int(box[3]))
+            crop = img[y1:y2, x1:x2]
+            if crop.size == 0:
+                return None
+            ch, cw = crop.shape[:2]
+
+            def to_crop(k, ks):
+                kc = k - [x1, y1]
+                inside = ((kc[:, 0] >= 0) & (kc[:, 0] <= cw - 1)
+                          & (kc[:, 1] >= 0) & (kc[:, 1] <= ch - 1))
+                kc[:, 0] = np.clip(kc[:, 0], 0, cw - 1)
+                kc[:, 1] = np.clip(kc[:, 1], 0, ch - 1)
+                return np.concatenate([kc, (ks * inside)[:, None]], axis=1), inside
+
+            smp = {"image": crop}
+            kp = pose_by[ang].get((cf, di))
+            if kp is not None:
+                kxyc, _ = to_crop(*kp)
+                smp["keypoints_xyc"] = kxyc
+            negs = []
+            for dj, b2 in dets[ang].get(cf, []):
+                if dj == di:
+                    continue
+                kp2 = pose_by[ang].get((cf, dj))
+                if kp2 is None:
+                    continue
+                nxyc, inside = to_crop(*kp2)
+                if inside.sum() >= 3:
+                    negs.append(nxyc)
+            smp["negative_kps"] = np.array(negs) if negs else np.zeros((0, 17, 3))
+            return smp
+
+        # sort by (ang, cf) for sequential-ish decode; embed in chunks of 64 samples
+        missing.sort()
+        CH = 64
+        for s0 in range(0, len(missing), CH):
+            chunk = missing[s0:s0 + CH]
+            samples, keys = [], []
+            for k in chunk:
+                smp = build_sample(k[0], k[1], k[2], need[k])
+                if smp is not None:
+                    samples.append(smp); keys.append(k)
+            if not samples:
+                continue
+            import torch as _t
+            with _t.no_grad():
+                _, embs, vis, _ = extractor(samples)
+            embs = embs.detach().cpu().numpy() if hasattr(embs, "cpu") else np.asarray(embs)
+            vis = vis.detach().cpu().numpy() if hasattr(vis, "cpu") else np.asarray(vis)
+            for k, e, v in zip(keys, embs, vis):
+                emb_map[k] = (e, v)
+            print(f"  embedded {min(s0+CH, len(missing))}/{len(missing)}", flush=True)
+        for c in caps.values():
+            c.release()
+        ks = list(emb_map)
+        np.savez_compressed(EMB_CACHE, keys=np.array(ks),
+                            embs=np.stack([emb_map[k][0] for k in ks]),
+                            vis=np.stack([emb_map[k][1] for k in ks]))
+        print(f"embeddings cached -> {EMB_CACHE}")
+
+    # ---------- KPR distance helper ----------
+    from torchreid.metrics.distance import compute_distance_matrix_using_bp_features
+    import torch as T
+
+    def kpr_dist(q_key, gal_keys):
+        if q_key not in emb_map:
+            return None
+        gk = [k for k in gal_keys if k in emb_map]
+        if not gk:
+            return None
+        qe = T.tensor(np.stack([emb_map[q_key][0]]))
+        qv = T.tensor(np.stack([emb_map[q_key][1]]))
+        ge = T.tensor(np.stack([emb_map[k][0] for k in gk]))
+        gv = T.tensor(np.stack([emb_map[k][1] for k in gk]))
+        D, _ = compute_distance_matrix_using_bp_features(qe, ge, qv, gv,
+                                                         use_gpu=False, use_logger=False)
+        d = np.sort(D.cpu().numpy()[0])
+        return float(d[:3].mean())
+
+    gal_keys = {pl: [(a, c, d) for a, c, d, _ in gal_specs[pl]] for pl in PLAYERS}
+    amb_lookup = {(pl, ang, f): cands for pl, ang, f, cands in amb}
+
+    # ---------- corrected choice + scoring, baseline vs KPR-assisted ----------
+    report = {}
+    for pl, num in PLAYERS.items():
+        frames, sel = frames_by_pl[pl]
+        tr = truth_by_pl[pl]
+        sam = sam_by_pl[pl]
+        chosen = {"base": {}, "kpr": {}}
+        n_ties = n_flipped = 0
+        for f in frames:
+            tp = tr.get(f)
+            for ang in ANGLES:
+                cf = f + OFFS[ang]
+                sr = sam.get(ang, {}).get(cf)
+                is_anchor = sr and any(anum == num and iou(sr["box"], abox) >= 0.3
+                                       for abox, anum, _ in anchors.get((ang, f), []))
+                if is_anchor:
+                    for m in chosen:
+                        chosen[m][(ang, f)] = sr["box"]
+                    continue
+                if tp is None:
+                    if sr:
+                        for m in chosen:
+                            chosen[m][(ang, f)] = sr["box"]
+                    continue
+                cands_all = [(di, b, float(np.linalg.norm(court(ang, b) - tp)))
+                             for di, b in dets[ang].get(cf, [])]
+                in_gate = [(di, b, d) for di, b, d in cands_all if d <= GATE_CM]
+                if not in_gate:
+                    if sr:
+                        for m in chosen:
+                            chosen[m][(ang, f)] = sr["box"]
+                    continue
+                nearest = min(in_gate, key=lambda x: x[2])
+                chosen["base"][(ang, f)] = nearest[1]
+                pick = nearest
+                key_c = (pl, ang, f)
+                if key_c in amb_lookup and len(in_gate) >= 2:
+                    n_ties += 1
+                    scored = []
+                    for di, b, d in in_gate:
+                        kd = kpr_dist((ang, cf, di), gal_keys[pl])
+                        if kd is not None:
+                            scored.append((kd + W_D * d / GATE_CM, di, b, d))
+                    if scored:
+                        best = min(scored, key=lambda x: x[0])
+                        if best[1] != nearest[0]:
+                            n_flipped += 1
+                        pick = (best[1], best[2], best[3])
+                chosen["kpr"][(ang, f)] = pick[1]
+
+        row = {"ties": n_ties, "flipped": n_flipped}
+        for m in ("base", "kpr"):
+            pc = {}
+            for ang in ANGLES:
+                nv = nh = 0
+                for f in frames:
+                    if ang not in sel[f]:
+                        continue
+                    cf = f + OFFS[ang]
+                    gb = [b for _, b in dets[ang].get(cf, [])]
+                    if sel[f][ang] >= len(gb):
+                        continue
+                    nv += 1
+                    cb = chosen[m].get((ang, f))
+                    if cb and iou(gb[sel[f][ang]], cb) >= IOU_HIT:
+                        nh += 1
+                if nv >= 20:
+                    pc[ang] = nh / nv
+            row[m] = {"per_cam": {k: round(v, 3) for k, v in pc.items()},
+                      "all_angles": round(sum(pc.values()) / len(pc), 3) if pc else None}
+        report[pl] = row
+        print(f"{pl}: ties {n_ties}, KPR flipped {n_flipped} | "
+              f"base {row['base']['all_angles']:.0%} -> KPR {row['kpr']['all_angles']:.0%}")
+
+    means = {m: np.mean([r[m]["all_angles"] for r in report.values()]) for m in ("base", "kpr")}
+    print(f"\nMEAN strict all-angles: base {means['base']:.1%} -> KPR-assisted {means['kpr']:.1%}"
+          f"   [SAM3+xcam was 88%]")
+    (REPO / f"runs/tracking/ledger/kprxcam_{KEY}.json").write_text(json.dumps(
+        {"window": KEY, "method": "hybrid xcam + KPR tie-break (no SAM3)",
+         "players": report, "mean": {m: round(float(v), 3) for m, v in means.items()}}, indent=1))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
