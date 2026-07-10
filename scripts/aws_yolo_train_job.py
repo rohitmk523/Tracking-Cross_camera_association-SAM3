@@ -26,7 +26,7 @@ DATASET = REPO / "data/detect_consolidated"
 DATASET_KEY = f"{J.PREFIX}/detect_consolidated.tar.gz"
 
 
-def userdata(dataset_url, results_url, log_url, model) -> str:
+def userdata(dataset_url, results_url, log_url, model, batch) -> str:
     return f"""#!/bin/bash
 exec > /var/log/yolo.log 2>&1
 export HOME=/root PYTHONUNBUFFERED=1 YOLO_CONFIG_DIR=/tmp/Ultralytics
@@ -54,7 +54,7 @@ done) &
 $PYBIN - <<'PY'; RC=$?
 from ultralytics import YOLO
 m = YOLO("{model}.pt")
-m.train(data="/work/detect_consolidated/data.yaml", imgsz=1280, epochs=100, batch=-1,
+m.train(data="/work/detect_consolidated/data.yaml", imgsz=1280, epochs=100, batch={batch},
         cos_lr=True, patience=25, cache="disk", mosaic=0.5, close_mosaic=15,
         copy_paste=0.0, project="runs", name="{model}-1280-ourdata-v1", exist_ok=True)
 best = YOLO("runs/{model}-1280-ourdata-v1/weights/best.pt")
@@ -98,7 +98,7 @@ def launch(a) -> None:
     tag = f"yolo_{a.model}"
     ud = userdata(presign("get", DATASET_KEY, 28800),
                   presign("put", J.results_key(tag), 172800),
-                  presign("put", J.log_key(tag), 172800), a.model)
+                  presign("put", J.log_key(tag), 172800), a.model, a.batch)
     ec2 = boto3.client("ec2", region_name=region)
     r = ec2.run_instances(
         ImageId=aws.get("ami"), InstanceType=aws.get("instance_type", "g5.2xlarge"),
@@ -135,6 +135,7 @@ def fetch(a) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True, choices=["yolo11s", "yolo11m"])
+    ap.add_argument("--batch", type=int, default=8)
     ap.add_argument("--fetch", action="store_true")
     ap.add_argument("--i-rotated-creds", action="store_true")
     a = ap.parse_args()
