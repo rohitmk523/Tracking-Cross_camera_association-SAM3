@@ -58,6 +58,8 @@ def main() -> int:
     ap.add_argument("--dump-dir", default=None,
                     help="write corrected per-camera masklets here (for rendering)")
     ap.add_argument("--only", default=None, help="restrict to one player, e.g. '#11'")
+    ap.add_argument("--pose", action="store_true",
+                    help="sole07 ankle projection (RTMPose cache) instead of bbox-bottom")
     a = ap.parse_args()
     from uball_cc.fusion.homography import load_calib, project_pixels
 
@@ -65,6 +67,7 @@ def main() -> int:
     offs = OFFS[key]
     calib = {ang: load_calib(str(REPO / f"configs/calib/{ang}.json")) for ang in ANGLES}
     dets = {}
+    pose_by = {ang: defaultdict(list) for ang in ANGLES}   # cf -> [(box, kpts, kscores)]
     for ang in ANGLES:
         z = np.load(REPO / f"runs/dets_cache/{a.game}_{ang}_{a.tag}_small_1280_t0.25.dets.npz")
         m = defaultdict(list)
@@ -72,6 +75,12 @@ def main() -> int:
             if int(c) in (0, 1):
                 m[int(f)].append([float(v) for v in b])
         dets[ang] = m
+        if a.pose:
+            pp = REPO / f"runs/pose_cache/{a.game}_{ang}_{a.tag}.pose.npz"
+            p = np.load(pp)
+            full = z["boxes"]
+            for f, d, k, ks in zip(p["frame_idx"], p["det_idx"], p["kpts"], p["kscores"]):
+                pose_by[ang][int(f)].append(([float(v) for v in full[int(d)]], k, ks))
     anchors = defaultdict(list)   # (cam, ref_frame) -> [(box, number)]
     for ev in json.loads((REPO / f"runs/anchors/{key}.jersey_anchors.json").read_text())["anchors"]:
         anchors[(ev["cam"], ev["frame"])].append((ev["box"], int(ev["number"]), ev.get("conf", 1.0)))
@@ -80,8 +89,21 @@ def main() -> int:
     if a.only and a.only not in gt:
         gt = {a.only: {"frames": {}, "approved": {}}}   # no-GT: build frames from masklets
 
-    def court(ang, box):
-        (x, y), = project_pixels([((box[0] + box[2]) / 2, box[3])], calib[ang])
+    def court(ang, box, cf=None):
+        px, py = (box[0] + box[2]) / 2, box[3]
+        if a.pose and cf is not None:
+            best, brow = 0.55, None
+            for pb, k, ks in pose_by[ang].get(cf, []):
+                v = iou(pb, box)
+                if v > best:
+                    best, brow = v, (pb, k, ks)
+            if brow is not None:
+                pb, k, ks = brow
+                good = [i for i in (15, 16) if ks[i] >= 0.5]      # L/R ankle
+                if good:
+                    px = float(np.mean([k[i][0] for i in good]))
+                    py = float(np.mean([k[i][1] for i in good])) + 0.07 * (pb[3] - pb[1])
+        (x, y), = project_pixels([(px, py)], calib[ang])
         return np.array([x, y])
 
     report = {}
@@ -121,7 +143,7 @@ def main() -> int:
                     continue
                 for abox, anum, aconf in anchors.get((ang, f), []):
                     if anum == num and iou(sr["box"], abox) >= 0.3:
-                        pts.append(court(ang, sr["box"])); ws.append(ZONE[ang] * aconf)
+                        pts.append(court(ang, sr["box"], f + offs[ang])); ws.append(ZONE[ang] * aconf)
                         break
             if pts:
                 anchor_pos[f] = np.average(pts, axis=0, weights=ws)
@@ -180,7 +202,7 @@ def main() -> int:
                 continue
             for ang in ANGLES:
                 if f in confirmed[ang]:
-                    pts.append(court(ang, confirmed[ang][f])); ws.append(ZONE[ang])
+                    pts.append(court(ang, confirmed[ang][f], f + offs[ang])); ws.append(ZONE[ang])
             if pts:
                 pts = np.array(pts); ws = np.array(ws)
                 med = np.median(pts, axis=0)
@@ -218,7 +240,7 @@ def main() -> int:
                 # override: nearest detection in this camera to the truth position
                 best, bestd = None, a.reacq_cm
                 for b in dets[ang].get(cf, []):
-                    d = float(np.linalg.norm(court(ang, b) - tp))
+                    d = float(np.linalg.norm(court(ang, b, cf) - tp))
                     if d < bestd:
                         best, bestd = b, d
                 if best is not None:
@@ -256,10 +278,10 @@ def main() -> int:
                 cf = f + offs[ang]
                 gb = dets[ang].get(cf, [])
                 if s[ang] < len(gb):
-                    gpos.append(court(ang, gb[s[ang]])); gw.append(ZONE[ang])
+                    gpos.append(court(ang, gb[s[ang]], cf)); gw.append(ZONE[ang])
                 cb = corrected.get((ang, f))
                 if cb and s[ang] < len(gb) and iou(gb[s[ang]], cb) >= a.iou_hit:
-                    spos.append(court(ang, cb)); sw.append(ZONE[ang]); hit = True
+                    spos.append(court(ang, cb, cf)); sw.append(ZONE[ang]); hit = True
             if hit:
                 fused_hit += 1
                 if gpos and spos:
