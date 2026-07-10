@@ -27,7 +27,7 @@ import aws_sam3_job as J   # noqa: E402
 ANGLES = ("FL", "FR", "NL", "NR")
 
 
-def userdata(bundle_url, results_url, log_url, game, tag, offsets_json) -> str:
+def userdata(bundle_url, results_url, log_url, game, tag, offsets_json, anchors_only="0") -> str:
     cams = " ".join(ANGLES)
     return f"""#!/bin/bash
 exec > /var/log/prep.log 2>&1
@@ -48,10 +48,12 @@ $PYBIN -c "import torch; assert torch.cuda.is_available(); print('torch OK')"
 mkdir -p /work && cd /work
 curl -s -L "{bundle_url}" -o b.tgz && tar xzf b.tgz
 export PYTHONPATH=/work/src
+mkdir -p data && ln -sfn /work/clips /work/data/clips
 mkdir -p runs/dets_cache runs/anchors runs/jersey out
 cp jersey/*.pt runs/jersey/
 RC=0
-for CAM in {cams}; do
+if [ "{anchors_only}" = "1" ]; then CAMS=""; else CAMS="{cams}"; fi
+for CAM in $CAMS; do
   echo "=== detect $CAM ==="
   $PYBIN scripts/track.py --video "clips/{game}_${{CAM}}_{tag}.mp4" --cam $CAM \\
     --weights weights/best.pth --model small --resolution 1280 --threshold 0.25 \\
@@ -93,6 +95,9 @@ def launch(a) -> None:
         def flt(ti):
             return None if "__pycache__" in ti.name else ti
         t.add(REPO / "src", arcname="src", filter=flt)
+        if a.anchors_only:
+            for c in (REPO / "runs/dets_cache").glob(f"{a.game}_*_{a.tag}_*.dets.npz"):
+                t.add(c, arcname=f"runs/dets_cache/{c.name}")
     tag2 = f"prep_{a.game[:3]}"
     bundle_key = f"{J.PREFIX}/blindprep_bundle_{tag2}.tar.gz"
     print(f"uploading bundle ({tmp.stat().st_size // 1_000_000} MB)...")
@@ -105,7 +110,7 @@ def launch(a) -> None:
     ud = userdata(presign("get", bundle_key, 28800),
                   presign("put", J.results_key(tag2), 86400),
                   presign("put", J.log_key(tag2), 86400),
-                  a.game, a.tag, a.offsets)
+                  a.game, a.tag, a.offsets, "1" if a.anchors_only else "0")
     ec2 = boto3.client("ec2", region_name=region)
     r = ec2.run_instances(
         ImageId=aws.get("ami"), InstanceType=aws.get("instance_type", "g5.2xlarge"),
@@ -146,6 +151,7 @@ def main() -> int:
     ap.add_argument("--game", required=True)
     ap.add_argument("--tag", required=True)
     ap.add_argument("--offsets", default="", help="JSON per-camera frame offsets (unused by extract, which audio-syncs)")
+    ap.add_argument("--anchors-only", action="store_true", help="skip detection (bundle existing dets caches)")
     ap.add_argument("--fetch", action="store_true")
     ap.add_argument("--i-rotated-creds", action="store_true")
     a = ap.parse_args()
