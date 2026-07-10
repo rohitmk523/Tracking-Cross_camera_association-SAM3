@@ -222,6 +222,51 @@ top-down court view — the system already holds players 89–100% of the time.
 
 ---
 
+## Part 6 — Edge deployment (Jetson AGX at the venue)
+
+The pipeline was rebuilt with the venue box in mind. Component by component on the
+Jetson AGX:
+
+| Layer | On the AGX |
+|---|---|
+| Motion tracking, court math, fusion, correction | trivially (CPU arithmetic) |
+| Jersey reading (three small models, runs on a few crops/frame) | comfortably |
+| Skeletons (RTMPose — an edge-first model) | comfortably |
+| Recognition (KPR) — fires only on ambiguous moments, a few % of crops | fine at that duty cycle |
+| **Detection (the one heavy per-frame layer)** | **the bottleneck: ~15–30fps optimized vs 120fps live** |
+
+What that means, honestly:
+- **Post-game processing on the venue box: realistic today.** Total active model
+  weight is under 2GB (SAM3 alone was 3.45GB); a 40-minute game processes in roughly
+  **1.5–3 hours on the AGX** after the standard Jetson porting pass (TensorRT
+  engines, FP16/INT8 quantization) — known engineering, not research.
+- **Live real-time: one more engineering phase.** Detection at reduced resolution,
+  detecting every 2nd–3rd frame with the tracker bridging between, and INT8
+  quantization plausibly reach "live with a few seconds of latency." SAM3's gap on
+  this hardware was 500×+ (impossible); the new stack's gap is 4–8× on a single
+  layer (an optimization problem).
+- **Self-improvement doesn't need the box**: fine-tuning runs in the cloud (~$2.5
+  per cycle); only updated weights ship to the venue.
+- **Detector choice is swappable.** Detection is the one layer where the model is a
+  commodity: the current RF-DETR (Apache-2.0 licensed) can be exchanged for a YOLO
+  family model — typically faster on Jetson with TensorRT — **provided it is
+  properly retrained on our footage for all three classes: player, referee, and
+  ball**. Detection quality is entirely a training-data question, and our labelled
+  dataset (below) transfers to any detector. One caveat to weigh: recent Ultralytics
+  YOLO versions carry an AGPL/commercial licence, versus RF-DETR's permissive
+  Apache-2.0 — a business decision, not a technical one.
+
+**Ball detection & possession — separate workstream, groundwork laid.** The
+detection dataset already includes the ball as a first-class label (~1,580 ball
+boxes across train/valid/test, built from the same annotation tooling), so any
+retrained detector — RF-DETR or YOLO — learns players, referees and ball together.
+Ball *tracking* and possession attribution ("who has the ball", feeding "who shot")
+are the next product layer on top of this pipeline: the design is straightforward
+given what now exists (ball track + player court positions → possession by
+proximity over time), and shot make/miss detection already lives in its own
+dedicated system that this pipeline will consume timestamps from. It is scoped,
+not started.
+
 ## Appendix A — How a player is tracked, start to finish
 
 1. **Detect** every player, every frame, every camera (solved, 96–100%).
