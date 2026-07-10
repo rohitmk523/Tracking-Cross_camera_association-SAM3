@@ -78,6 +78,19 @@ Conclusion: SAM3 is a superb *accuracy benchmark* and label generator, and the w
 *production engine*. We retired it from the pipeline and set out to match its
 accuracy with components that run in minutes for dollars.
 
+**Why we believed a SAM3-free pipeline would work — the bet, before any testing.**
+Our measurements had already shown that most of the accuracy never came from SAM3:
+the jersey-checkpoint and court-correction machinery lifted even a simple tracker
+from 48% to 78%, leaving SAM3 responsible for ~10 points, all concentrated in one
+moment — same-kit pile-ups. So the question was never "replace SAM3 everywhere,"
+only "find a better tool for that one moment." Two existed: **skeletons** (precise
+foot placement for the court map, and a way to point at a specific body in a crowd)
+and **KPR**, a recognition model designed exactly for crowded, occluded, identically
+dressed people — it describes a pointed-at player as per-body-part signatures and
+compares only the parts visible in both images. If those two layers held up on our
+footage, the whole pipeline would run in minutes for dollars. Everything below is
+that bet, built and then tested against the same human truth as SAM3 was.
+
 ## Part 4 — The production pipeline (no SAM3), explained properly
 
 Every layer below exists to answer one question — *who is this body?* — using a
@@ -149,9 +162,16 @@ a fallback search radius prevents "shown nothing" frames.
 | **Mean** | **88%** | **82.3%** |
 | Cost per game | $25–35+, hours | **$4–8, under an hour** |
 
-Production-pipeline demo videos: `sam3player_n11_sam3free_e6fba750.mp4`,
-`sam3player_n22_sam3free_e6fba750.mp4`, `sam3player_n43_sam3free_e6fba750.mp4`,
-`sam3player_n6_sam3free_e6fba750.mp4`.
+**The evidence, in one place (view in this order):**
+1. The comparison table above — same truth, same strict metric, both pipelines.
+2. Per-player videos, SAM3 era: `sam3player_n{11,22,43,6}_final88_e6fba750.mp4`;
+   production pipeline: `sam3player_n{11,22,43,6}_sam3free_e6fba750.mp4` — same
+   minute, watch them side by side.
+3. Whole-pipeline videos (every player at once, court-mapped):
+   `demo_allplayers_e6fba750.mp4` (tuned game) and `demo_allplayers_c2a354fe.mp4`
+   (blind game — footage the system was never tuned on).
+4. Failure heatmap of the current pipeline: `runs/tracking/pipeline_failure_heatmap.jpg`
+   (Appendix B) — where the remaining misses live and why the venue fixes target them.
 
 ## Part 5 — Closing the gap: what is running right now, and what comes next
 
