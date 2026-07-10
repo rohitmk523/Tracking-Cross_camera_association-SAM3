@@ -29,7 +29,7 @@ import numpy as np
 REPO = Path(__file__).resolve().parents[1]
 ANGLES = ("FL", "FR", "NL", "NR")
 OFFS = {"e6fba750_44_60": {"FL": 0, "FR": -11, "NL": -1, "NR": -1},
-        "c2a354fe_300_60": {"FL": 0, "FR": -4, "NL": -3, "NR": -4},
+        "c2a354fe_300_60": {"FL": 0, "FR": 1, "NL": 2, "NR": -1},
         "e6fba750_44_180": {"FL": 0, "FR": -11, "NL": -1, "NR": -1}}
 ZONE = {"FL": 0.6, "FR": 0.6, "NL": 1.0, "NR": 1.0}
 
@@ -81,9 +81,10 @@ def main() -> int:
             full = z["boxes"]
             for f, d, k, ks in zip(p["frame_idx"], p["det_idx"], p["kpts"], p["kscores"]):
                 pose_by[ang][int(f)].append(([float(v) for v in full[int(d)]], k, ks))
-    anchors = defaultdict(list)   # (cam, ref_frame) -> [(box, number)]
+    anchors = defaultdict(list)   # (cam, ref_frame) -> [(box, number, conf, kit)]
     for ev in json.loads((REPO / f"runs/anchors/{key}.jersey_anchors.json").read_text())["anchors"]:
-        anchors[(ev["cam"], ev["frame"])].append((ev["box"], int(ev["number"]), ev.get("conf", 1.0)))
+        anchors[(ev["cam"], ev["frame"])].append(
+            (ev["box"], int(ev["number"]), ev.get("conf", 1.0), ev.get("kit")))
     gtp = REPO / f"data/gt_players/{key}.json"
     gt = json.loads(gtp.read_text()) if gtp.exists() else {}
     if a.only and a.only not in gt:
@@ -114,6 +115,7 @@ def main() -> int:
         if not digits or pl.startswith("ref"):
             continue
         num = int(digits)
+        kit = pl[-1] if pl[-1] in ("B", "W") else None   # team-aware identity for dual numbers
         safe = pl.replace("#", "n").replace(" ", "")
         sam = {}
         for ang in ANGLES:
@@ -141,8 +143,8 @@ def main() -> int:
                 sr = sam.get(ang, {}).get(cf)
                 if not sr:
                     continue
-                for abox, anum, aconf in anchors.get((ang, f), []):
-                    if anum == num and iou(sr["box"], abox) >= 0.3:
+                for abox, anum, aconf, akit in anchors.get((ang, f), []):
+                    if anum == num and iou(sr["box"], abox) >= 0.3 and (kit is None or akit in (None, kit)):
                         pts.append(court(ang, sr["box"], f + offs[ang])); ws.append(ZONE[ang] * aconf)
                         break
             if pts:
@@ -164,9 +166,9 @@ def main() -> int:
                     read[f] = None
                     continue
                 r = 0
-                for abox, anum, aconf in anchors.get((ang, f), []):
+                for abox, anum, aconf, akit in anchors.get((ang, f), []):
                     if iou(sr["box"], abox) >= 0.3:
-                        r = 1 if anum == num else -1
+                        r = 1 if (anum == num and (kit is None or akit in (None, kit))) else -1
                         break
                 read[f] = r
             # expand from every +1 frame forward and backward along present, non-contradicted mask
@@ -228,7 +230,8 @@ def main() -> int:
                 sr = sam.get(ang, {}).get(cf)
                 # anchor camera keeps its (confirmed) box
                 is_anchor = sr and any(anum == num and iou(sr["box"], abox) >= 0.3
-                                       for abox, anum, _ in anchors.get((ang, f), []))
+                                       and (kit is None or akit in (None, kit))
+                                       for abox, anum, _, akit in anchors.get((ang, f), []))
                 if is_anchor:
                     corrected[(ang, f)] = sr["box"]
                     continue

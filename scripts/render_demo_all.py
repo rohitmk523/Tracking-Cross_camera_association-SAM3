@@ -51,7 +51,7 @@ def main() -> int:
         d = json.loads(p.read_text())
         tracks.setdefault(pl, {})[ang] = {int(f): r["box"] for f, r in d["frames"].items()
                                           if r.get("present") and r.get("box")}
-    players = sorted(tracks, key=lambda s: int(s[1:]))
+    players = sorted(tracks, key=lambda s: (int(''.join(c for c in s if c.isdigit())), s))
     color = {pl: COLORS[i % len(COLORS)] for i, pl in enumerate(players)}
     print(f"rendering {len(players)} players: {players}")
 

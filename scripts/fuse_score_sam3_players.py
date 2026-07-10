@@ -32,7 +32,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 ANGLES = ("FL", "FR", "NL", "NR")
 OFFS = {"e6fba750_44_60": {"FL": 0, "FR": -11, "NL": -1, "NR": -1},
-        "c2a354fe_300_60": {"FL": 0, "FR": -4, "NL": -3, "NR": -4}}
+        "c2a354fe_300_60": {"FL": 0, "FR": 1, "NL": 2, "NR": -1}}
 ZONE = {"FL": 0.6, "FR": 0.6, "NL": 1.0, "NR": 1.0}
 
 
