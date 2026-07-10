@@ -143,15 +143,20 @@ Production-pipeline demo videos: `sam3player_n11_sam3free_e6fba750.mp4`,
 
 ## Part 5 — Closing the gap: what is running right now, and what comes next
 
-**The flywheel (in progress now).** The 69% pile-up recognition above is from a model
-that has never seen basketball. Every game the system processes generates its own
-training labels for free — each confident jersey read is a labelled photo of that
-player. We have already auto-built a training set of **3,061 crops** from the second
-game (label quality audited against human truth: 89–100% per identity) and a
-fine-tuning run is in flight (~$1–2 of GPU). Expected effect: pile-up recognition
-toward ~85% per frame, lifting the pipeline to an estimated **85–87%** — matching
-SAM3's accuracy at roughly **1/20th of its cost**. This loop repeats every time more
-footage is processed: *the tracking improves on its own as the system is used.*
+**The flywheel — first cycle completed and measured.** Every game the system
+processes generates its own training labels for free (each confident jersey read is a
+labelled photo of that player). We auto-built **3,061 labelled crops from the second
+game** (label quality audited against human truth: 89–100% per identity) and
+fine-tuned the recognition model on them for ~$2.5 of GPU. Measured effect on the
+FIRST game — footage the fine-tune never saw:
+- pile-up recognition of identical-kit team-mates: **69% → 75%** (best player 68% → 88%)
+- full pipeline, strict all-angles: **82.3% → 83.2%** (#11 92%, #6 85%, #22 82%, #43 74%)
+
+That is one cycle on one minute of training footage from one game. The loop repeats —
+and compounds — every time more footage is processed: more games → more auto-labels →
+sharper recognition → better tracking. Next cycles add training windows from more
+games at near-zero marginal cost. Remaining gap to the retired SAM3 benchmark: 4.8
+points, concentrated in one weak camera-cell (#43 far-right).
 
 **The whole-pipeline demo video (next deliverable).** All demos so far track one
 player at a time. The next video shows the actual product behaviour: **every player
