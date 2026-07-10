@@ -109,12 +109,24 @@ body keypoints (ankles, knees, hips, shoulders…). Two reasons this matters:
 **4. Appearance in pile-ups — KPR (keypoint-promptable re-identification).** The one
 moment every other signal fails simultaneously is the scrum: boxes overlap (motion
 tracking fails), kits are identical (colour fails), numbers face away (reading
-fails). KPR is a recognition model built exactly for this: given a crowded crop
-*plus the skeleton of the specific player we mean*, it produces a numeric signature
-of **that player only** — build, skin tone, hair, shoes — and compares signatures
-using only body parts visible in both images. On our footage, **zero-shot** (never
-trained on basketball), it picks the right same-kit team-mate **69% of the time
-(chance: 33%)**. We use it in two places:
+fails). KPR is a recognition model built exactly for this. How it works, in plain
+terms:
+  - Instead of one overall "face-ID"-style signature, it describes a person as
+    **separate signatures per body region** — head, torso, arms, legs, feet — like a
+    structured witness statement rather than a single impression.
+  - It is **pointable**: along with the image we hand it the skeleton of the player
+    we mean (from the pose layer). The model then describes *that* body and actively
+    ignores the tangled opponents around it — which is exactly the pile-up situation.
+  - Every body-region signature carries a **visibility score**, and two players are
+    compared **only on regions visible in both images**. If the legs are hidden
+    behind another player, the legs simply don't vote — occlusion stops corrupting
+    the comparison instead of poisoning it.
+  - With identical jerseys, what remains discriminative is what the model keys on:
+    build, skin tone, hair, shoes, sleeves — the things team-mates *don't* share.
+  - It **learns from the system's own footage**: every confident jersey read is a
+    labelled photo, so each processed game sharpens it (measured: 69% → 75% correct
+    in pile-ups after one ~$2.5 self-training cycle, chance being 33%).
+  We use it in two places:
   - **Tie-breaking**: when two bodies sit near the expected position, KPR votes.
   - **Re-acquisition**: when a player has been lost for over ~8 seconds (sub, bench,
     long scrum), we scan all cameras for someone who *looks like him*, tag him
