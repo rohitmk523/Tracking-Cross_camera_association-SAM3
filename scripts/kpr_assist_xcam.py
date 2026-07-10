@@ -43,7 +43,7 @@ MIN_H = 90
 GALLERY_N = 12
 W_D = 0.3                                   # court-distance weight in the tie-break
 IOU_HIT = 0.3
-EMB_CACHE = REPO / f"runs/pose_cache/{KEY}.kpr_embs.npz"
+EMB_CACHE = REPO / f"runs/pose_cache/{KEY}.kpr_embs{_os.environ.get('KPR_TAG', '')}.npz"
 
 
 def iou(a, b):
@@ -162,7 +162,7 @@ def main() -> int:
             cwd = os.getcwd()
             os.chdir(KPR)
             try:
-                cfg = build_config(config_path=str(KPR / "configs/kpr/imagenet/kpr_occ_posetrack_test.yaml"))
+                cfg = build_config(config_path=str(KPR / __import__("os").environ.get("KPR_CFG", "configs/kpr/imagenet/kpr_occ_posetrack_test.yaml")))
                 cfg.use_gpu = False
                 cfg.test.batch_size = 8
                 _ext["x"] = KPRFeatureExtractor(cfg)

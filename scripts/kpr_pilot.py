@@ -50,6 +50,8 @@ def restricted_torch_load():
         ("numpy", "dtype"): __import__("numpy").dtype,
         ("numpy.core.multiarray", "scalar"):
             __import__("numpy.core.multiarray", fromlist=["scalar"]).scalar,
+        ("numpy._core.multiarray", "scalar"):
+            __import__("numpy.core.multiarray", fromlist=["scalar"]).scalar,
         ("torch", "FloatStorage"): torch.FloatStorage,
         ("torch", "LongStorage"): torch.LongStorage,
         ("torch._utils", "_rebuild_tensor_v2"): torch._utils._rebuild_tensor_v2,
@@ -90,7 +92,7 @@ def main() -> int:
     cwd = os.getcwd()
     os.chdir(KPR)                      # yaml's load_weights path is CWD-relative
     try:
-        cfg = build_config(config_path=str(KPR / "configs/kpr/imagenet/kpr_occ_posetrack_test.yaml"))
+        cfg = build_config(config_path=str(KPR / __import__("os").environ.get("KPR_CFG", "configs/kpr/imagenet/kpr_occ_posetrack_test.yaml")))
         cfg.use_gpu = False
         cfg.test.batch_size = 8                    # small batches: Swin-B on CPU, avoid OOM
         extractor = KPRFeatureExtractor(cfg)

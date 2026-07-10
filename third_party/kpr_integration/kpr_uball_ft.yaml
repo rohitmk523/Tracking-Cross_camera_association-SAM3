@@ -1,0 +1,46 @@
+# Fine-tune the released Occ-PoseTrack KPR checkpoint on uball jersey-confirmed crops.
+# Override default values in 'scripts/default_config.py'
+
+project:
+  name: "uball-kpr-ft"
+
+data:
+  root: "reid_data"
+  sources: ['uball']
+  targets: ['uball']
+  height: 256
+  width: 128
+  norm_mean: [0.485, 0.456, 0.406]
+  norm_std: [0.229, 0.224, 0.225]
+  transforms: ['rc', 'rf']    # no BIPO (needs pre-generated occluder masks we don't have)
+
+model:
+  save_model_flag: True
+  load_weights: "pretrained_models/kpr_occ_pt_IN_82.34_92.33_42323828.pth.tar"
+  kpr:
+    keypoints:
+      prompt_masks: keypoints_gaussian
+      prompt_preprocess: cck8
+    masks:
+      dir: "pose_on_img_crops"
+      preprocess: "eight"
+  transreid:
+    sie_camera: False
+
+train:
+  max_epoch: 12
+  batch_size: 24
+  optim: "adam"
+  lr: 0.00003
+  lr_scheduler: "cosine_annealing"
+  fixbase_epoch: 2
+  open_layers: ["parts_identity_classifier", "global_identity_classifier",
+                "foreground_identity_classifier", "concat_parts_identity_classifier",
+                "background_identity_classifier"]
+  eval_freq: 4
+
+test:
+  batch_size: 64
+  evaluate: False
+  visrank: False
+  start_eval: 11    # evaluate only near the end (viz-free)
