@@ -35,7 +35,10 @@ for P in /opt/pytorch/bin/python /usr/bin/python3; do
   if [ -x "$P" ] && $P -c "import torch,sys;sys.exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then PYBIN=$P; break; fi
 done
 [ -z "$PYBIN" ] && PYBIN=/usr/bin/python3
-$PYBIN -m pip install -q numpy Cython h5py six scipy opencv-python-headless "matplotlib<3.9" future yacs gdown albumentations==1.3.1 pandas tabulate deepdiff wandb monai torchmetrics==1.3.0 timm scikit-image tqdm omegaconf scikit-learn tensorboard segment-anything 2>&1 | tail -1
+TV=$($PYBIN -c "import torch;print(torch.__version__.split('+')[0])")
+$PYBIN -m pip install -q "torch==$TV" numpy Cython h5py six scipy opencv-python-headless "matplotlib<3.9" future yacs gdown albumentations==1.3.1 pandas tabulate deepdiff wandb monai torchmetrics==1.3.0 timm scikit-image tqdm omegaconf scikit-learn tensorboard segment-anything 2>&1 | tail -1
+$PYBIN -m pip uninstall -q -y torchaudio 2>/dev/null || true
+$PYBIN -c "import torch; assert torch.cuda.is_available(), 'CUDA lost after installs'; print('torch OK', torch.__version__)"
 SP=$($PYBIN -c "import site;print(site.getsitepackages()[0])")
 mkdir -p "$SP/cosine_annealing_warmup"
 printf 'class CosineAnnealingWarmupRestarts:\\n    def __init__(self,*a,**k): raise NotImplementedError()\\n' > "$SP/cosine_annealing_warmup/__init__.py"
