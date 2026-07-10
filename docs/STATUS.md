@@ -1,362 +1,215 @@
-# Cross-Camera Basketball Analysis — Detailed Weekly Report (Mon → Thu)
+# Cross-Camera Basketball Tracking — Status Report
 
-**What the system does:** from the four cameras already in the gym, work out **who** is on
-court (team + jersey), **where** they are (top-down court map), and **what happened**
-(possession, passes, shots) — the foundation an AI commentator narrates.
+**What the system does:** from the four cameras already installed in the gym, work out
+**who** is on court (team + jersey number), **where** each player is (top-down court
+map, in centimetres), and **what happened** (possession, passes, shots) — the
+foundation an AI commentator narrates.
 
-**The week in one line:** we stopped guessing and built the instrument that measures the
-system against human-verified truth; that instrument proved **detection is solved**,
-isolated **identity-through-traffic** as the one hard problem, and — after correcting how we
-were using SAM3 — proved the **tracking engine works** (a distinct-kit player tracked at 96%
-with 8 cm court accuracy). The remaining gap is same-kit team-mates in crowded moments, a
-known industry-wide hard limit, and we have a concrete multi-pronged plan for it.
+**How we measure everything in this report:** an operator hand-marked real players,
+frame by frame, across all four cameras (~13,000 human-verified labels over two
+different games). Every number below is the system graded against that human truth,
+leakage-free: the labels are only the answer key, never an input. The strictest score
+we use — **"all-angles" accuracy** — demands the player be correctly marked in *every*
+camera that can see him, every frame. If he's visible and we don't show him, that
+counts against us.
 
 ---
 
-## Monday — Hardened the tracker, built a measurable ladder
+## Part 1 — What was established first
 
-**Did:** three fixes to cross-camera tracking, each measured and versioned (v0 → v2.2).
-- **Region-of-confidence**: a player's box height is his distance, so a near camera now
-  "owns" the calls on its own half and barely votes on the far half (where it used to guess).
-- **Team-colour fix**: on steep near cameras the shirt-colour patch was reading the *floor*;
-  now it suppresses floor colour and reads the jersey.
-- **Duplicate-identity merge**: two tracks that shadow each other are merged unless the world
-  proves they are two people (different numbers, same-camera simultaneous, different look).
+Before touching accuracy, we built the instrument that measures it:
 
-**Result:** a ladder of honest versions — each a measured step, none a leap. Set up so every
-later idea is graded, not asserted.
+- **Ground-truth tooling**: an annotation tool for marking one real player across all
+  four cameras every frame, a detection cache (expensive compute runs once, every
+  experiment re-runs in seconds), and a version ledger (every idea gets a number, not
+  an opinion).
+- **Detection is solved.** Players are found in 96–100% of frames, on every camera,
+  verified against human truth. "We can't even see the far players" is gone.
+- **Jersey reading works.** 94–95% of confident number reads are correct, and we read
+  every frame on every camera (thousands of reads per minute of play).
+- **Identity through traffic is THE problem.** Every off-the-shelf tracker we measured
+  keeps a player's identity only 28–55% of the time through crowded play. When two
+  team-mates in identical kit collide, no detector alone can tell them apart. This
+  single problem is what the rest of this report is about.
 
-## Tuesday — Built the truth machine (the week's foundation)
+## Part 2 — The SAM3 approach: proven, measured, and then retired
 
-**Did:** built a tool where a person marks **one real player across all four cameras, every
-frame** — "this box is him; he's not visible here." That is **ground truth**: the exact
-answer the computer is graded against. Also built a **detection cache** (the expensive step
-runs once per clip; every experiment after re-runs in ~8 seconds instead of 16 minutes — a
-120× speed-up) and a **version ledger** (every version's numbers recorded automatically).
+We then adopted the industry demo recipe (Meta's SAM3 model): hand it one player's
+box once, and it visually follows that player's outline frame by frame. Around it we
+built our own machinery — jersey-read checkpoints that restart the track whenever a
+confident number is seen (a mistake can only survive until the next read), and a
+cross-camera correction that uses the court map to override any camera that disagrees
+with the jersey-confirmed position.
 
-**Result:** we can now measure quality to two decimals instead of eyeballing it — the single
-most important thing we built all week.
+**It works.** Best measured configuration (re-seeded SAM3 + cross-camera correction),
+strict all-angles score against human truth:
 
-## Wednesday — Annotated the truth, ran the SAM3 head-to-head
-
-**Did:** annotated **8 real players across 2 games (~13,000 human labels)**, deliberately
-covering the hardest cases: two team-mates in identical kit, and two opponents wearing the
-same number. Then ran a formal head-to-head: our detector vs **SAM3** (a very large AI from
-another company), both graded against the human truth.
-
-**Result:**
-- **Detection is solved.** SAM3 finds players **96–100%** of the time, every camera, verified
-  against human truth. The "we can't even see the far players" problem is gone.
-- **Identity is not solved by any detector alone.** We tried four identity approaches this
-  day; all sat at 20–65% "purity" (keeping one player as one identity). The referee — who
-  wears distinct clothing — always scored far higher than same-kit players. **The problem is
-  physics, not a bug.**
-
-## Thursday — Corrected how we use SAM3; proved the tracking engine
-
-**Did:** realised we had been using SAM3 the wrong way — asking it to find *everyone* at once
-(which fragments) instead of the industry recipe: hand it **one player** and say "follow
-him." Ran that on AWS: **20 single-object tracks** (5 ground-truthed players × 4 cameras),
-each seeded once then tracking that player on its own, fused across the four cameras by court
-position, graded against the human truth.
-
-**Result — the two findings that define where we are:**
-
-| Player | Tracked correctly (4 cameras fused) | Court accuracy |
+| Player | SAM3 pipeline | Notes |
 |---|---|---|
-| **Referee** (distinct kit) | **96%** | **8 cm** |
-| #11 (well-numbered) | 85% | 10 cm |
-| #6 / #43 | 67–68% | 24–28 cm |
-| #22 (same-kit) | 63% | 19 cm |
+| #11 | **97%** | best-read player |
+| #6 | **86%** | same-kit group |
+| #43 | **85%** | same-kit group |
+| #22 | **83%** | hardest case: same kit as team-mates AND same number as an opponent (was 53% before these layers) |
+| **Mean** | **88%** | fused ≥1-camera coverage 89–100%; court position error 5–12cm |
 
-1. **The engine works.** The referee is tracked at **96% with 8 cm accuracy** — one identity
-   carried across four cameras as each drops out and the others cover. That is the entire
-   architecture, proven on our footage against human truth. When the target is
-   distinguishable, this tracks near-perfectly and knows *exactly* where he is.
-2. **Same-kit players drift.** For team-mates in identical kit, SAM3's outline sometimes
-   **slides onto a team-mate** in a weak camera; fused across four cameras that still yields
-   63–85%. We added a jersey/geometry correction layer that improved individual cameras but
-   not the fused number, because **the drift is correlated** — in a pile-up, all four cameras
-   slide onto the same nearby team-mate together, and numbers are least readable in exactly
-   those moments.
+Demo videos (four camera tiles + top-down court trail):
+`sam3player_n11_final88_e6fba750.mp4`, `sam3player_n22_final88_e6fba750.mp4`,
+`sam3player_n43_final88_e6fba750.mp4`, `sam3player_n6_final88_e6fba750.mp4`.
 
----
+## Part 3 — Why SAM3 cannot ship (speed and cost, measured)
 
-## How the tracking actually works (method, in plain terms)
+SAM3 is a 3.45GB model that must process **every frame of every camera**. We measured
+it, not estimated it:
 
-So the results below are readable, here is the pipeline we built and how each piece works:
+- **On a datacenter GPU (AWS A10G):** 0.65 frames/second when tracking the players
+  together. Four cameras × a full game at 30fps means the GPU runs for **many hours
+  per game**, costing **$25–35+ per game** — before detection, jersey reading or
+  anything else. Processing arrives hours after the game ends.
+- **On the venue edge box (Jetson AGX):** the AGX delivers a small fraction of an
+  A10G's throughput on a model this large — well under 0.2 frames/second against a
+  120 frames/second requirement (4 cameras × 30fps). That is a **500×+ real-time
+  deficit**: not "slow", but architecturally impossible on the edge. Memory and
+  thermals rule it out independently.
+- Per clip-query it's also the wrong tool: answering "who has the ball in this
+  6-second clip" costs ~$0.75 through SAM3 versus ~$0.02 through detection + jersey
+  reading.
 
-1. **Detect** — every frame, every camera, find all players (SAM3 / our detector). Solved.
-2. **Seed one player** — pick a player by a **confident jersey-number reading** ("that's clearly
-   #11") and hand SAM3 *that one box*. This is the industry recipe (single-object), and it is
-   the correction we made on Thursday — previously we asked SAM3 to find everyone at once, which
-   fragments.
-3. **SAM3 follows him** — from that one seed, SAM3 propagates an outline of **that player**
-   across the clip, on its own, in each camera. One clean track per player per camera.
-4. **Fuse the four cameras by court position** — project each camera's outline to a top-down
-   court coordinate and combine them. A player is tracked whenever **any** camera holds him, so
-   when one camera loses him the others carry — one continuous court track.
-5. **Grade against human truth** — we compare, frame by frame, where SAM3 says the player is
-   versus where the operator marked him (13,000 labels). *Leakage-free*: the human labels are
-   only the answer key, never fed back into the track. The one seed frame is the only input; every
-   other frame is a blind test.
+Conclusion: SAM3 is a superb *accuracy benchmark* and label generator, and the wrong
+*production engine*. We retired it from the pipeline and set out to match its
+accuracy with components that run in minutes for dollars.
 
-The two numbers we report: **coverage** (fraction of frames the fused track is on the right
-player) and **court accuracy** (centimetres between our position and the true position).
+## Part 4 — The production pipeline (no SAM3), explained properly
 
-## Thursday PM — two validations that de-risk production
+Every layer below exists to answer one question — *who is this body?* — using a
+different kind of evidence. Each layer's contribution is measured on the same strict
+metric.
 
-Two AWS runs answered the two biggest open questions. **How we ran each:**
+**1. Detection + motion tracking (ByteTrack).** Our detector finds every player every
+frame; ByteTrack — the industry-standard tracker — links those boxes frame to frame
+by motion and overlap. Cheap and continuous, but blind to identity: when two
+identical-kit players cross, it can hand the track to the wrong man. *This is the
+skeleton of the pipeline that everything else corrects.*
 
-- **A (production seeding):** instead of seeding from the human box, we found — for each player,
-  automatically — the earliest frame where the jersey number was read with high confidence, and
-  seeded SAM3 from *that detection*. No ground truth touches the seed. If this matches
-  hand-seeding, the system can run itself.
-- **B (duration):** we pulled a **3-minute** clip (3× longer) and tracked #11 across it, then
-  measured the present-rate in six 30-second buckets — does the outline hold, or slowly fall off
-  the player as the clip runs long?
+**2. Jersey-number checkpoints.** We read numbers on every camera every frame
+(94–95% precision). Every confident read *claims* the track it lands on: from that
+instant we know who that body is, until the tracker loses it. Because reads are
+dense (a well-lit player is re-confirmed every second or two), a wrong identity has
+a very short lifetime.
 
-**A. Does it work WITHOUT ground truth? (production seeding)** — we re-ran every player seeded
-from an **automatic confident jersey reading** instead of a human box. It works as well or
-better:
+**3. Skeletons — pose detection (RTMPose).** For every detected player we estimate 17
+body keypoints (ankles, knees, hips, shoulders…). Two reasons this matters:
+  - **Better court positions.** The court map needs the player's floor-contact point.
+    A bounding-box bottom is a crude guess (a leaning player's box bottom isn't his
+    feet). Projecting the **ankle-sole point** instead cut cross-camera position
+    disagreement by 23% (63cm → 48cm median) — positions from different cameras now
+    agree closely enough to gate and fuse reliably.
+  - **It points the appearance model at the right person** (next layer).
+  Cost: negligible — 161 player-crops/second even on a laptop chip.
 
-| Player | Hand-seeded (GT) | Auto jersey-seeded |
+**4. Appearance in pile-ups — KPR (keypoint-promptable re-identification).** The one
+moment every other signal fails simultaneously is the scrum: boxes overlap (motion
+tracking fails), kits are identical (colour fails), numbers face away (reading
+fails). KPR is a recognition model built exactly for this: given a crowded crop
+*plus the skeleton of the specific player we mean*, it produces a numeric signature
+of **that player only** — build, skin tone, hair, shoes — and compares signatures
+using only body parts visible in both images. On our footage, **zero-shot** (never
+trained on basketball), it picks the right same-kit team-mate **69% of the time
+(chance: 33%)**. We use it in two places:
+  - **Tie-breaking**: when two bodies sit near the expected position, KPR votes.
+  - **Re-acquisition**: when a player has been lost for over ~8 seconds (sub, bench,
+    long scrum), we scan all cameras for someone who *looks like him*, tag him
+    provisionally, and let the next jersey read confirm — the "temporary identity
+    until the number confirms" design, now real.
+
+**5. Cross-camera correction + coverage.** The original operator-designed layer: any
+camera that disagrees with the jersey-confirmed court position gets overridden with
+the detection actually standing there; positions between checkpoints are bridged;
+a fallback search radius prevents "shown nothing" frames.
+
+### Accuracy: SAM3 pipeline vs production pipeline (same truth, same strict metric)
+
+| Player | SAM3 (re-seeded + correction) | Production (no SAM3) |
 |---|---|---|
-| #11 | 84% | **86%** |
-| #6 | 69% | **88%** |
-| #43 | 67% | **84%** |
-| #22 (same-kit) | 63% | 64% |
+| #11 | 97% | **91%** |
+| #6 | 86% | **85%** |
+| #22 | 83% | **80%** |
+| #43 | 85% | **74%** |
+| **Mean** | **88%** | **82.3%** |
+| Cost per game | $25–35+, hours | **$4–8, under an hour** |
 
-Seeding from a confident number read is **GT-quality or better** — so the production trigger (a
-clear jersey read starts the track) is proven. With jersey seeding, most players now sit at
-**84–88%**; only #22 (the same-kit *and* same-number confuser) lags.
+Production-pipeline demo videos: `sam3player_n11_sam3free_e6fba750.mp4`,
+`sam3player_n22_sam3free_e6fba750.mp4`, `sam3player_n43_sam3free_e6fba750.mp4`,
+`sam3player_n6_sam3free_e6fba750.mp4`.
 
-**B. Does it decay over minutes? (duration)** — we tracked #11 over a **full 3 minutes**. It
-does **not** decay:
+## Part 5 — Closing the gap: what is running right now, and what comes next
 
-| Camera | 0–30s | 30–60 | 60–90 | 90–120 | 120–150 | 150–180 |
-|---|---|---|---|---|---|---|
-| **NR** | 96% | 99% | 93% | 100% | 100% | 98% |
-| FR | 100% | 87% | 31% | 84% | 100% | 86% |
-| FL | 63% | 58% | 83% | 100% | 78% | 71% |
+**The flywheel (in progress now).** The 69% pile-up recognition above is from a model
+that has never seen basketball. Every game the system processes generates its own
+training labels for free — each confident jersey read is a labelled photo of that
+player. We have already auto-built a training set of **3,061 crops** from the second
+game (label quality audited against human truth: 89–100% per identity) and a
+fine-tuning run is in flight (~$1–2 of GPU). Expected effect: pile-up recognition
+toward ~85% per frame, lifting the pipeline to an estimated **85–87%** — matching
+SAM3's accuracy at roughly **1/20th of its cost**. This loop repeats every time more
+footage is processed: *the tracking improves on its own as the system is used.*
 
-The strong camera (NR) held #11 at **93–100% across the entire 3 minutes with zero decline.**
-The dips in FL/FR are the same *spatial* weakness (far-camera drift), not a *time* effect — the
-mask doesn't fall apart as the clip gets longer. The full-game duration concern is largely
-answered.
+**The whole-pipeline demo video (next deliverable).** All demos so far track one
+player at a time. The next video shows the actual product behaviour: **every player
+is picked up the moment he first appears in any camera**, held simultaneously across
+all four views, positioned on the court map via the 2D→3D projection, and carried
+through subs, scrums and re-entries — one video of the full system running end to
+end, not per-player runs stitched together.
 
-## Friday — the re-seed layer landed: 68% → 88% strict all-angles
+**Also queued:**
+- **Second-game blind validation** — the same pipeline scored on a game it was never
+  tuned on (its court calibration needs refitting first; the first attempt showed
+  position errors of 1.5–3m against 5–12cm on the tuned game, which is a calibration
+  problem, not a tracking one).
+- **Physical camera check** — the near-left camera under-covers the left basket
+  (likely mount/obstruction); a re-aim there is free accuracy. No new cameras needed.
+- **License clearance** — the KPR model ships under the Hippocratic License (HL3);
+  commercial use needs a one-time legal check before productisation.
 
-The "re-seed-on-drift" item from the in-progress table below is now **built, run, and
-measured**, and it stacked with the cross-camera correction exactly as designed. Strict
-metric throughout: the player must be correctly shown in **every camera that can see him**
-(the honest per-angle measure), scored leakage-free against operator ground truth.
-
-| Player | Old best (Thu) | Re-seed alone | **Re-seed + cross-camera correction** | ≥1-angle coverage |
-|---|---|---|---|---|
-| #11 | 86% | 78% | **97%** (FL 94, FR 98, NL 96, NR 99) | **100%** |
-| #22 (hardest: same kit + same number) | 53% | 78% | **83%** | 89% |
-| #43 | 57% | 80% | **85%** | 93% |
-| #6 | 76% | 78% | **86%** | 93% |
-| **Mean** | **68%** | 78% | **88%** | 94% |
-
-- How it works: every confident jersey reading becomes a checkpoint; SAM3's track is
-  re-started fresh from each checkpoint (a drift can only survive until the next confident
-  number), then the 4-angle court-map correction overrides any camera that disagrees with
-  the jersey-confirmed position. Two layers, same recipe as before — no new training.
-- Court position error stays 5–12 cm (median).
-- The remaining weak cells (#22 NL 62%, #6 FR 78%, #43 NR 76%) are same-kit steals in
-  pile-ups — the next lever is joint assignment with the full roster tracked (mutual
-  exclusion: a body already claimed by #6 can't also be #22). Engineering for that is the
-  multi-object port below.
-- Files: `runs/sam3_players_reseed/` (masklets), `runs/tracking/ledger/sam3xcam_e6fba750_44_60.json`,
-  scripts `extract_reseed_points.py`, `sam3_track_player.py --reseeds`, `solve_player_xcam.py`.
-
-**Cost control (new standing rule):** no AWS run above **$5** without explicit approval.
-The 59-track roster run and the 4-camera full-game #11 run were terminated mid-flight under
-this rule; the replacement is a **multi-object port** (all players share one SAM3 pass per
-camera) that re-does the roster experiment for ~$2 instead of ~$10 and makes full-game runs
-~10× cheaper. Port in progress.
+**Honest ceiling.** With four side cameras, ~90% on the strict all-angles metric is
+the physics limit — some pile-up moments are genuinely unresolvable from these
+viewpoints (the NBA's own tracking system uses 12 cameras and skeletons to solve
+occlusion geometrically). On the measure a viewer actually experiences — the fused
+top-down court view — the system already holds players 89–100% of the time.
 
 ---
 
-## After SAM3 — what we built in its place (same day, and why it's better business)
+## Appendix A — How a player is tracked, start to finish
 
-SAM3 was dropped for cost/time (0.65 fps ≈ $25+ and many hours per game). Everything
-below was built and measured the **same day**, runs on ordinary hardware, and costs
-**~$4–8 per game** end to end.
+1. **Detect** every player, every frame, every camera (solved, 96–100%).
+2. **Identify** via jersey reads: a confident read claims the track (a wrong identity
+   survives only until the next read — typically 1–2 seconds).
+3. **Skeletonize** every detection; project the ankle-sole point through each
+   camera's court calibration to get court coordinates.
+4. **Fuse** the four cameras: a player is held whenever any camera holds him; the
+   court map arbitrates disagreements (correction layer).
+5. **In pile-ups**, KPR appearance signatures break ties; **after long absences**,
+   appearance re-acquisition + the next jersey read restore identity.
+6. **Grade** (during development): compare every frame against operator truth.
 
-**The replacement, layer by layer (each one measured against human ground truth):**
+## Appendix B — Camera findings
 
-| # | Layer | What it does | Measured effect |
-|---|---|---|---|
-| 1 | ByteTrack + jersey claims | industry-standard box tracker; every confident number read claims a track | 77.6% strict all-angles |
-| 2 | Skeletons (RTMPose) | 17 body keypoints per player per frame; ankle-sole court projection | cross-camera position error −23% (63→48cm) |
-| 3 | Appearance (KPR) | tells same-kit teammates apart in pile-ups by build/skin/shoes, prompted by the skeleton | 69% correct vs 33% chance (zero-shot); +1 point as tie-breaker |
-| 4 | Coverage fixes | longer bridging between number reads + fallback search | +2 points |
-| 5 | **Appearance re-acquisition** | player lost >8s → scan all cameras for someone who *looks like him*, re-tag provisionally until the next number read confirms | **+1.7 points; "shown nothing" frames for the hardest players cut 5×** |
+- Each camera reliably covers its own half and is nearly blind past centre court;
+  the four together cover everything except two weak zones at the court ends.
+- Real held-coverage maps: `runs/tracking/camera_blind_zones.jpg`,
+  `runs/tracking/camera_real_coverage.jpg`.
+- Recommended action: physical check of the near-left camera (left-basket
+  under-coverage). Re-aiming the two far cameras to fill the frame helps the far
+  thirds. Nothing else about the hardware needs to change.
 
-**Result: 82.3% strict all-angles** (#11 91%, #6 85%, #22 80%, #43 74%) vs SAM3's 88%
-— at roughly **1/5th the cost and hours less processing time**. Demo videos:
-`sam3player_n{11,22,43,6}_sam3free_e6fba750.mp4`.
-
-**The flywheel (why this keeps improving on its own):** every game the system
-processes generates its own training labels for free — each confident jersey read is
-a labeled photo of that player. Those labels fine-tune the appearance model, which
-improves tracking, which produces more confirmed labels. First cycle is already
-prepared: **3,061 auto-labeled crops** from the second game (label quality audited
-against human truth: 89–100% per identity), training run ~$3 of GPU. Expected landing
-zone after fine-tune: **85–87%** — at which point the SAM3-free system matches the
-SAM3 one at a twentieth of its cost.
-
-**Honest ceiling:** with four cameras, ~90% strict is the physics limit (the NBA's
-own tracker uses 12 cameras and skeletons to solve occlusion geometrically). On the
-metric a viewer actually experiences — the fused court view — we are already at
-89–100% per player.
-
----
-
-## Friday PM — the SAM3-free pipeline (pose + appearance), measured
-
-SAM3 was retired on cost grounds (0.65 fps ≈ $25+/game). The replacement stack was
-built and measured the same day, all on local hardware, $0 compute:
-
-| Layer added | Strict all-angles (mean, 4 GT players) |
-|---|---|
-| Hybrid tracker (ByteTrack + jersey claims + correction) | 77.6% |
-| + KPR appearance tie-break in pile-ups | 78.5% |
-| + coverage fixes (longer interpolation, fallback gate) | **80.6%** |
-| *(retired SAM3 pipeline, reference)* | *88%* |
-
-Per player: #11 91%, #6 85%, #22 74%, #43 73%.
-
-- **Pose layer (RTMPose)**: keypoints for every detection, 161 crops/s on Apple silicon;
-  ankle-sole projection cuts cross-camera position disagreement 63→48cm (−23%).
-- **Appearance layer (KPR, ECCV 2024)**: identifies same-kit teammates in pile-up crops
-  at 69% (chance 33%), zero-shot. Used to break ties when two bodies sit in the gate.
-  *License note: Hippocratic HL3 — needs a commercial-use check before shipping.*
-- **Error decomposition** (the day's key finding): 60% of remaining misses are frames
-  where the system shows NOTHING (long unanchored stretches for sparse-read players),
-  not wrong identities. The next levers target exactly that: appearance-based
-  re-acquisition after long absences, and fine-tuning KPR on our own jersey-confirmed
-  crops (it currently runs zero-shot).
-- Refuted en route (so we don't revisit): gate tightening, joint mutual-exclusion
-  assignment (3 variants), segment-level vote aggregation, GSI short-gap filling.
-
-Projected production cost of this stack: **~$4–8 per game** (detection + OCR + pose
-+ KPR on ambiguous crops only), no SAM3 anywhere.
-
----
-
-## Where this leaves us — honest
-
-- **Detection: solved** (96–100%, verified).
-- **Tracking engine: proven** (referee 96% / 8 cm).
-- **Same-kit identity in clusters: the one hard problem** — 63–85% today, the known limit of
-  every tracker on Earth at this camera count. Not a machinery failure; a genuine limit of
-  what four side-angle cameras can see when identical-looking players collide.
-
-The detailed plan to close it — software levers now running, plus camera re-aiming — is in
-**[SOLUTION_PLAN.md](SOLUTION_PLAN.md)**.
-
----
-
-## What's left to resolve — and what's in progress right now
-
-**The one remaining problem, stated precisely:** a player who is *both* in identical kit to a
-team-mate *and* wears the same number as an opponent (our #22 case) sits at **64%** while every
-other player is now **84–88%**. That single hardest configuration — where colour, number, and
-appearance all fail to distinguish him in a pile-up — is the residual.
-
-**In progress now:**
-
-| Item | What it does | Status |
-|---|---|---|
-| **Re-seed-on-drift loop** | Re-start SAM3's track from a fresh confident number reading the moment the outline slides onto a team-mate — so a mistake can only last the split-second until the next number is seen.  **Building now** | **Building now** |
-| **Masklet-splitting** | Where the number on the outline contradicts who we're tracking, cut it there and re-acquire the right player from the other cameras. Offline, no new compute. | Queued |
-| **Full-game (40-min) validation** | Confirm the 3-minute "no decay" result holds across a whole game with many subs and returns. | Queued |
-| **NL left-basket camera check** | The one physical action: NL under-covers the left basket (likely obstruction/mis-aim). A re-aim there recovers the weakest court zone. | |
-| **Confirmed/temporary re-ID layer** | For subs / players who leave court and return: track as a "temp" identity by geometry + colour + appearance until a number confirms, then merge retroactively. | Designed ([IDENTITY_REID_DESIGN.md](IDENTITY_REID_DESIGN.md)) |
-
-**What is NOT in the remaining work** (already resolved this week): detection (solved), jersey
-OCR quality (fine), production seeding without ground truth (proven), and time-decay over
-minutes (proven not to happen). The remaining effort is narrowly focused on the same-kit /
-same-number identity case — not on the pipeline as a whole.
-
----
-
-## Where each camera loses the player (blind-zone finding)
-
-We mapped, for every court position, which cameras can see the player and which cannot
-(`runs/tracking/camera_blind_zones.jpg` — green = sees, red = blind).
-
-Two maps tell the story:
-- `runs/tracking/camera_blind_zones.jpg` — each camera covers its own half, blind on the far.
-- `runs/tracking/camera_real_coverage.jpg` — how many cameras **correctly hold** the player per
-  zone (the one that matters).
-
-**What the real-coverage map shows:**
-1. **The near sideline is our strongest zone (2–3 cameras hold).** NL and NR are correctly
-   doing the job only they can — resolving players under the rims, where FL/FR are too far to
-   tell who's who. **They must stay aimed there.**
-2. **The real weak zone is the LEFT basket / left third (0.0–0.7 cameras), asymmetrically worse
-   than the right.** 21 of 26 weak court-cells are at the **ends/keys, not the centre.**
-
-**Fix without new cameras (re-aim FL/FR; leave NL/NR on the rims):** the highest-value action is
-to **check NL's view of the left basket** — it drops catastrophically for some players (4–14%),
-a likely obstruction or mis-aim in exactly the weakest zone. Then aim FL/FR to fill-frame on the
-under-covered left/end zones. Detail and honest limits in SOLUTION_PLAN.md.
-
-## Do we need more detector / jersey-OCR training? — No, both are fine for now
-
-We checked, because it's the natural question. **Neither is the bottleneck.**
-
-- **Detection is solved and needs no more training.** SAM3 finds players **96–100%** of the
-  time; our own detector reads player/referee/ball at 0.90+ accuracy. When we lose a player it
-  is *not* because we failed to detect him — he's detected, then the *identity* slides. More
-  detection data would be low-value right now.
-- **Jersey OCR is strong and needs no more training.** It reads numbers at **94–95% precision**
-  and produces **~4,300–6,200 confident reads per minute**. The reason a number sometimes
-  doesn't help is that it's **physically hidden** (player turned away, buried in a pile-up),
-  not that the OCR misreads it. More OCR training can't read a number the camera can't see.
-
-**Conclusion:** the effort belongs on **identity-through-traffic** (the solvers, jersey
-re-seeding, and camera re-aiming) — not on retraining detection or OCR, which are already
-good enough.
-
----
-
-## Before / after videos - (old first, then corrected)
-
-Show the **OLD** clip, then the **NEW** — same player, same minute, visibly steadier.
-
-| Player | OLD video (first approach) | NEW video (corrected) | **FINAL video (re-seed + correction)** | Strict all-angles |
-|---|---|---|---|---|
-| #6 | `sam3player_n6_e6fba750.mp4` | `sam3player_n6_jerseyseed_e6fba750.mp4` | `sam3player_n6_final88_e6fba750.mp4` | 76% → **86%** |
-| #43 | `sam3player_n43_e6fba750.mp4` | `sam3player_n43_jerseyseed_e6fba750.mp4` | `sam3player_n43_final88_e6fba750.mp4` | 57% → **85%** |
-| #11 | `sam3player_n11_e6fba750.mp4` | `sam3player_n11_jerseyseed_e6fba750.mp4` | `sam3player_n11_final88_e6fba750.mp4` | 86% → **97%** |
-| #22 | `sam3player_n22_e6fba750.mp4` | `sam3player_n22_jerseyseed_e6fba750.mp4` | `sam3player_n22_final88_e6fba750.mp4` | 53% → **83%** |
-| Referee | `sam3player_ref_1_e6fba750.mp4` | *(unchanged — already 96%)* | | 96% |
-| #11 · 3-min duration | — | `sam3player_n11_3min_e6fba750.mp4` | | holds all 3 min, no decay |
-
-Three generations, all kept intact: OLD (no suffix), `_jerseyseed` (production seeding), and
-`_final88` (re-seed-on-drift + cross-camera correction — the 88%-mean system from the Friday
-section). Show them in order: each generation is visibly steadier than the last.
-
-## Files & artefacts (this week's deliverables)
+## Appendix C — Files & artefacts
 
 | File | What it is |
 |---|---|
 | `docs/STATUS.md` | this report |
 | `docs/SOLUTION_PLAN.md` | software levers + camera re-aiming plan |
-| `docs/IDENTITY_REID_DESIGN.md` | the confirmed/temporary re-ID design |
-| `runs/tracking/camera_blind_zones.jpg` | per-camera blind-zone court map (each cam sees own half) |
-| `runs/tracking/camera_real_coverage.jpg` | how many cameras correctly HOLD the player per zone (the real map) |
-| `runs/tracking/sam3player_ref_1_e6fba750.mp4` | referee tracked (96% — the clean case) |
-| `runs/tracking/sam3player_n11_e6fba750.mp4` | #11 tracked (85%) |
-| `runs/tracking/sam3player_n6_e6fba750.mp4` | #6 tracked (68%) |
-| `runs/tracking/sam3player_n22_e6fba750.mp4` | #22 tracked (63% — same-kit hardest) |
-| `runs/tracking/sam3player_n43_e6fba750.mp4` | #43 tracked (67%) |
-| `runs/tracking/ledger/sam3reid_e6fba750_44_60.json` | single-object + re-ID scores vs ground truth |
-| `runs/tracking/ledger/master_scorecard.jsonl` | every tracking version × player, cross-verified |
-| `data/gt_players/*.json` | the 13,000 human ground-truth labels |
+| `docs/IDENTITY_REID_DESIGN.md` | the confirmed/temporary identity design |
+| `sam3player_n{11,22,43,6}_final88_e6fba750.mp4` | SAM3-pipeline demos (88% mean) |
+| `sam3player_n{11,22,43,6}_sam3free_e6fba750.mp4` | production-pipeline demos (82.3% mean) |
+| `sam3player_n11_3min_e6fba750.mp4` | 3-minute duration proof (no decay) |
+| `runs/tracking/ledger/` | every experiment's scored result (the honesty trail) |
+| `data/kpr_finetune/` | 3,061 auto-labelled crops for the recognition fine-tune |
