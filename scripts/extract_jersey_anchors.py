@@ -48,13 +48,16 @@ def main() -> int:
                     help="crops buffered per jersey-stack flush")
     ap.add_argument("--angles", default=",".join(ANGLES))
     ap.add_argument("--out-suffix", default="", help="testing: suffix for output file")
+    ap.add_argument("--offsets", default=None,
+                    help='explicit offsets JSON, e.g. \'{"FL":0,"FR":-11,"NL":-1,"NR":-1}\' '
+                         "(camera-clock constants; skips audio sync)")
     a = ap.parse_args()
 
     from uball_cc.tracking.jersey_stack import JerseyStack
-    from uball_cc.tracking.kit_shade import jersey_shade
+    from uball_cc.tracking.kit_shade import jersey_shade_hv
 
     key = f"{a.game}_{a.tag}"
-    offs = OFFS.get(key)
+    offs = json.loads(a.offsets) if a.offsets else OFFS.get(key)
     if offs is None:
         from uball_cc.fusion.audiosync import audio_offset_seconds
         offs = {"FL": 0}
@@ -98,9 +101,10 @@ def main() -> int:
                 kp = pose.get((clip_f, di)) if pose else None
                 if kp is not None:
                     k, ks = kp
-                    sh = jersey_shade(crop, k - [int(max(0, b[0])), int(max(0, b[1]))], ks)
-                    if sh is not None:
-                        ev["shade"] = round(sh, 1)
+                    vh = jersey_shade_hv(crop, k - [int(max(0, b[0])), int(max(0, b[1]))], ks)
+                    if vh is not None:
+                        ev["shade"] = round(vh[0], 1)
+                        ev["hue"] = round(vh[1], 1)
                 anchors.append(ev)
             pend.clear()
 
