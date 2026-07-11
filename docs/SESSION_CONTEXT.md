@@ -142,6 +142,22 @@ via GT_DETS_DIR; kit-copy step required for dual streams — n3→n3B/n3W).
 | yolo11s | .766 | .844 | 1578s | 67.2 | 6857 |
 | yolo11m | .762 | .816 | 1560s | 60.3 | 6756 |
 
+**EVENTS WORKSTREAM (2026-07-12, user-approved >$5 until live) — FIRST MILESTONE.**
+Full-game e6 (55.7min): chunked cache prep (6×10min, detect+ball+pose+dense-s1
+anchors, scripts/aws_fullgame_prep_job.py + aws_anchors_patch_job.py; traps paid:
+bare-`wait` on infinite uploader loop $3.4; offsets single-quote bug ate anchors,
+grep swallowed traceback). Court zones: configs/court_zones_court-a.json (3PT
+model=white paint ±1cm; 4PT red-paint arc fit L949.5/R939.8cm, scripts/
+extract_court_zones.py). Events engine scripts/detect_events.py v1.5 (possession:
+ball-player proximity + x-cam vote + hysteresis + STICKY; attribution at GT play
+timestamps; REBOUND/STEAL forward windows; zone at logged-ts position). GT: 219
+plays data/plays/e6fba750_*.json (per-chunk). **RESULTS: dev(1-4) WHO 50%/zone 61%;
+HELD-OUT(5-6) 45%/57%; full game 48%/60%; FTs ~solved.** REFUTED: ball interp at
+3-12% recall (2/9→0/9). CEILING = ball detection recall (1,257 train balls) →
+fork: ball retrain (+4th-class job) vs phase-2 possession-change rules. Ball cache
+builder: scripts/build_ball_cache.py (conf 0.08 barely helps — data problem).
+Names on videos: data/rosters/*.json + render_demo_all labels. Events total ~$15.
+
 **PHASE 1+2 COMPLETE (2026-07-11 evening).** Phase 1 (batching, GATED, commit
 78c1fd1): jersey_stack.read_crops (batched 3-stage), anchors sequential-decode +
 inline kit shades, annotate_anchor_kits fast path — OCR+kits 1230s→82s (15×);
