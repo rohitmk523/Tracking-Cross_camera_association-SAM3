@@ -147,7 +147,19 @@ order pipeline outcomes; box consistency/mAP50-95 correlates better).
 3. ACCURACY push: kit-aware identity on e6 (#22 same-number opponent — free win);
    #43 far-court cell diagnosis; flywheel cycle 2 (e6+f66 auto-labels into KPR);
    bigger jersey numbers with the venue (highest-leverage physical change).
-4. Ball workstream (detection labels exist; tracking/possession scoped not started).
+4. OCR-detection consolidation (user-directed, post-winner):
+   - Number-box YOLO labels EXIST: Training_frameworks/"Uball OCR Master" annotates
+     player/referee/NUMBER boxes in YOLO format (HF dataset-backed); the current
+     localizer (YOLO11n, 0.99 mAP50 on crops) was trained from this line.
+   - Options in order: (a) 4TH-CLASS PILOT — add "number" to the winner detector →
+     one pass does players+refs+ball+number boxes, deletes the localizer stage
+     (caveat: full-frame numbers only resolvable at near/mid sizes — acceptable per
+     the precision thesis); (b) retrain localizer in the WINNER's family/size for
+     stack consistency — honest note: 0.99 on crops is saturated, size-up buys
+     ~nothing; the win is family consistency + more data via the active-learning
+     loop, not capacity; (c) batch all three OCR stages + stride-2 reads (validated)
+     = the actual real-time multiplier.
+5. Ball workstream (detection labels exist; tracking/possession scoped not started).
 
 ## 8b. Backlog (ordered)
 
