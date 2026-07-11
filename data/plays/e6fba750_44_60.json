@@ -1,0 +1,53 @@
+{
+ "game": "e6fba750",
+ "window": "44_60",
+ "clip_t0": 44.0,
+ "plays": [
+  {
+   "t": 44.0,
+   "cls": "FG_MISS",
+   "a": "Daniel Mark Baad"
+  },
+  {
+   "t": 46.5,
+   "cls": "REBOUND",
+   "a": "Fui Martinez"
+  },
+  {
+   "t": 60.9,
+   "cls": "3PT_MISS",
+   "a": "Fui Martinez"
+  },
+  {
+   "t": 63.5,
+   "cls": "REBOUND",
+   "a": "Dioscar Gregorio Gomez"
+  },
+  {
+   "t": 68.2,
+   "cls": "BLOCK",
+   "a": "Bryant Besu"
+  },
+  {
+   "t": 70.8,
+   "cls": "REBOUND",
+   "a": "Tajzmere Divine McKnight"
+  },
+  {
+   "t": 77.6,
+   "cls": "FG_MAKE",
+   "a": "Dioscar Gregorio Gomez"
+  },
+  {
+   "t": 91.6,
+   "cls": "FG_MAKE",
+   "a": "Brayan Delgado"
+  },
+  {
+   "t": 101.9,
+   "cls": "4PT_MAKE",
+   "a": "Fui Martinez",
+   "b": "Brayan Delgado"
+  }
+ ]
+}
