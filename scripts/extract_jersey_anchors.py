@@ -6,17 +6,24 @@ relentlessly — every camera, every frame, every crop the legibility gate passe
 and emit RAW per-frame anchor events (not per-track attributes). Each event clamps
 identity at one instant; the solver repairs identity outward from every clamp.
 
+Phase-1 optimized (docs/OPTIMIZATION_PLAN.md): crops run through the jersey stack
+in BATCHES (read_crops), the video is decoded sequentially once (no per-frame
+seeks), and — when the pose cache exists — each confident read also stores the
+pose-guided torso "shade" so annotate_anchor_kits never re-decodes the video.
+Models, thresholds and event semantics are identical to the per-crop version.
+
 Reads detection boxes from the version-independent cache, so anchors are valid for
 any tracking version. Output: runs/anchors/{game}_{tag}.jersey_anchors.json
-  [{frame(ref timeline), cam, box, number, conf}]
+  [{frame(ref timeline), cam, box, number, conf[, shade]}]
 
-  python scripts/extract_jersey_anchors.py --game e6fba750 --tag 44_60
+  python scripts/extract_jersey_anchors.py --game e6fba750 --tag 44_60 --stride 2
 """
 from __future__ import annotations
 
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 import cv2
@@ -27,7 +34,7 @@ sys.path.insert(0, str(REPO / "src"))
 
 ANGLES = ("FL", "FR", "NL", "NR")
 OFFS = {"e6fba750_44_60": {"FL": 0, "FR": -11, "NL": -1, "NR": -1},
-        "c2a354fe_300_60": None}
+        "c2a354fe_300_60": {"FL": 0, "FR": 1, "NL": 2, "NR": -1}}   # audio-synced, GT-validated
 MIN_BOX_H = 90                   # even far-ish crops: the legibility gate does the filtering
 
 
@@ -37,9 +44,14 @@ def main() -> int:
     ap.add_argument("--tag", required=True)
     ap.add_argument("--stride", type=int, default=1,
                     help="read every Nth frame (2 = ~15 reads/s, plenty of anchor density)")
+    ap.add_argument("--batch", type=int, default=128,
+                    help="crops buffered per jersey-stack flush")
+    ap.add_argument("--angles", default=",".join(ANGLES))
+    ap.add_argument("--out-suffix", default="", help="testing: suffix for output file")
     a = ap.parse_args()
 
     from uball_cc.tracking.jersey_stack import JerseyStack
+    from uball_cc.tracking.kit_shade import jersey_shade
 
     key = f"{a.game}_{a.tag}"
     offs = OFFS.get(key)
@@ -53,26 +65,58 @@ def main() -> int:
 
     stack = JerseyStack()
     anchors = []
-    for ang in ANGLES:
+    for ang in a.angles.split(","):
         z = np.load(REPO / f"runs/dets_cache/{a.game}_{ang}_{a.tag}_small_1280_t0.25.dets.npz")
-        by_f: dict[int, list] = {}
-        for b, s, c, f in zip(z["boxes"], z["scores"], z["classes"], z["frame_idx"]):
+        by_f: dict[int, list] = {}          # clip_frame -> [(full_det_idx, box)]
+        for di, (b, s, c, f) in enumerate(zip(z["boxes"], z["scores"], z["classes"], z["frame_idx"])):
             if int(c) == 0 and float(s) >= 0.3:
-                by_f.setdefault(int(f), []).append([float(v) for v in b])
+                by_f.setdefault(int(f), []).append((di, [float(v) for v in b]))
+        pose_p = REPO / f"runs/pose_cache/{a.game}_{ang}_{a.tag}.pose.npz"
+        pose = None
+        if pose_p.exists():
+            p = np.load(pose_p)
+            pose = {(int(f), int(d)): (k, s) for f, d, k, s in
+                    zip(p["frame_idx"], p["det_idx"], p["kpts"], p["kscores"])}
+
         cap = cv2.VideoCapture(str(REPO / f"data/clips/{a.game}_{ang}_{a.tag}.mp4"))
         n_read = n_hit = 0
-        pos = -1
-        for clip_f in sorted(by_f):
-            if clip_f % a.stride:
-                continue
-            if clip_f != pos + 1:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, clip_f)
+        t0 = time.time()
+        pend: list[tuple[int, int, list, np.ndarray]] = []   # (clip_f, di, box, crop)
+
+        def flush():
+            nonlocal n_hit
+            if not pend:
+                return
+            reads = stack.read_crops([c for *_, c in pend], sub_batch=a.batch)
+            for (clip_f, di, b, crop), (num, conf) in zip(pend, reads):
+                if num is None:
+                    continue
+                n_hit += 1
+                ev = {"frame": clip_f - offs[ang], "cam": ang,
+                      "box": [round(v, 1) for v in b],
+                      "number": int(num), "conf": round(conf, 3)}
+                kp = pose.get((clip_f, di)) if pose else None
+                if kp is not None:
+                    k, ks = kp
+                    sh = jersey_shade(crop, k - [int(max(0, b[0])), int(max(0, b[1]))], ks)
+                    if sh is not None:
+                        ev["shade"] = round(sh, 1)
+                anchors.append(ev)
+            pend.clear()
+
+        # sequential decode: read every frame once, skip work off-stride (a seek
+        # per strided frame costs more than decoding the frame we skip)
+        max_f = max(by_f) if by_f else -1
+        clip_f = -1
+        while clip_f < max_f:
             ok, img = cap.read()
-            pos = clip_f
+            clip_f += 1
             if not ok:
+                break
+            if clip_f % a.stride or clip_f not in by_f:
                 continue
             ih, iw = img.shape[:2]
-            for b in by_f[clip_f]:
+            for di, b in by_f[clip_f]:
                 if b[3] - b[1] < MIN_BOX_H:
                     continue
                 x1, y1 = max(0, int(b[0])), max(0, int(b[1]))
@@ -80,22 +124,22 @@ def main() -> int:
                 if x2 - x1 < 20 or y2 - y1 < MIN_BOX_H:
                     continue
                 n_read += 1
-                num, conf = stack.read_crop(img[y1:y2, x1:x2])
-                if num is not None:
-                    n_hit += 1
-                    anchors.append({"frame": clip_f - offs[ang], "cam": ang,
-                                    "box": [round(v, 1) for v in b],
-                                    "number": int(num), "conf": round(conf, 3)})
+                pend.append((clip_f, di, b, img[y1:y2, x1:x2].copy()))
+            if len(pend) >= a.batch:
+                flush()
+        flush()
         cap.release()
-        print(f"{ang}: {n_read} crops gated, {n_hit} confident reads", flush=True)
+        print(f"{ang}: {n_read} crops gated, {n_hit} confident reads "
+              f"({n_read / max(1e-6, time.time() - t0):.0f} crops/s)", flush=True)
 
-    out = REPO / f"runs/anchors/{key}.jersey_anchors.json"
+    out = REPO / f"runs/anchors/{key}.jersey_anchors{a.out_suffix}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps({"game": a.game, "tag": a.tag, "stride": a.stride,
                                "offsets": offs, "anchors": anchors}))
     from collections import Counter
     per_num = Counter(x["number"] for x in anchors)
-    print(f"TOTAL: {len(anchors)} anchor events -> {out}")
+    n_shaded = sum(1 for x in anchors if "shade" in x)
+    print(f"TOTAL: {len(anchors)} anchor events ({n_shaded} shaded) -> {out}")
     print("per number:", dict(per_num.most_common()))
     return 0
 

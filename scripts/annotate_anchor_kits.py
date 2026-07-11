@@ -25,21 +25,9 @@ REPO = Path(__file__).resolve().parents[1]
 ANGLES = ("FL", "FR", "NL", "NR")
 
 
-def jersey_shade(crop, kpts, kscores):
-    sh = [i for i in (5, 6) if kscores[i] >= 0.3]
-    hp = [i for i in (11, 12) if kscores[i] >= 0.3]
-    h, w = crop.shape[:2]
-    if sh and hp:
-        y1 = int(max(0, min(kpts[i][1] for i in sh)))
-        y2 = int(min(h, max(kpts[i][1] for i in hp)))
-        x1 = int(max(0, min(kpts[i][0] for i in sh + hp) - 5))
-        x2 = int(min(w, max(kpts[i][0] for i in sh + hp) + 5))
-    else:
-        y1, y2, x1, x2 = int(0.2 * h), int(0.5 * h), int(0.25 * w), int(0.75 * w)
-    if y2 <= y1 or x2 <= x1:
-        return None
-    hsv = cv2.cvtColor(crop[y1:y2, x1:x2], cv2.COLOR_BGR2HSV)
-    return float(np.median(hsv[:, :, 2]))
+import sys as _sys
+_sys.path.insert(0, str(REPO / "src"))
+from uball_cc.tracking.kit_shade import jersey_shade  # noqa: E402
 
 
 def main() -> int:
@@ -53,6 +41,15 @@ def main() -> int:
     ap_path = REPO / f"runs/anchors/{key}.jersey_anchors.json"
     doc = json.loads(ap_path.read_text())
     offs = doc["offsets"]
+
+    # FAST PATH (Phase 1): the anchor extractor already stored pose-guided torso
+    # shades inline -> no video decode, no pose matching; clustering only.
+    dual_evs = [(i, ev) for i, ev in enumerate(doc["anchors"]) if int(ev["number"]) in dual]
+    shaded = [(i, ev) for i, ev in dual_evs if "shade" in ev]
+    if dual_evs and len(shaded) >= 0.8 * len(dual_evs):
+        raw = [(i, int(ev["number"]), ev["cam"], float(ev["shade"])) for i, ev in shaded]
+        print(f"fast path: {len(raw)}/{len(dual_evs)} dual-number events carry inline shades")
+        return _cluster_and_tag(doc, ap_path, dual, raw)
 
     pose = {}
     for ang in ANGLES:
@@ -125,6 +122,10 @@ def main() -> int:
     for c in caps.values():
         c.release()
 
+    return _cluster_and_tag(doc, ap_path, dual, raw)
+
+
+def _cluster_and_tag(doc, ap_path, dual, raw) -> int:
     by_cam = defaultdict(list)
     for _, _, ang, sh in raw:
         by_cam[ang].append(sh)

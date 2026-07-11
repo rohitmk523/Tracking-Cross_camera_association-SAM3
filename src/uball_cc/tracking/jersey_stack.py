@@ -52,42 +52,75 @@ class JerseyStack:
 
     def read_crop(self, crop_bgr: np.ndarray) -> tuple[str | None, float]:
         """Player crop (BGR) -> (number string | None, confidence). Abstains honestly."""
+        return self.read_crops([crop_bgr])[0]
+
+    def read_crops(self, crops_bgr: list, sub_batch: int = 64,
+                   loc_batch: int = 32) -> list[tuple[str | None, float]]:
+        """Batched read: same three gates as read_crop, one GPU pass per stage
+        instead of one per crop. Returns (number|None, confidence) per input crop,
+        order-aligned. This is the Phase-1 throughput path — the models and
+        thresholds are identical to the per-crop path."""
         import cv2
         torch = self.torch
-        if crop_bgr is None or crop_bgr.size == 0:
-            return None, 0.0
-        rgb = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)
-        # 1. legibility gate (trained at 160x96)
-        leg_in = self.leg_tf(cv2.resize(rgb, (96, 160))).unsqueeze(0).to(self.device)
-        with torch.no_grad():
-            p_leg = torch.softmax(self.legibility(leg_in), 1)[0, 1].item()
-        if p_leg < LEGIBLE_MIN:
-            return None, p_leg
-        # 2. localize the number
-        res = self.localizer.predict(crop_bgr, imgsz=640, conf=LOC_MIN, verbose=False,
-                                     device=self.device)[0]
-        if res.boxes is None or len(res.boxes) == 0:
-            return None, p_leg
-        k = int(res.boxes.conf.argmax())
-        x1, y1, x2, y2 = (float(v) for v in res.boxes.xyxy[k])
-        h, w = crop_bgr.shape[:2]
-        px, py = (x2 - x1) * PAD, (y2 - y1) * PAD
-        rx1, ry1 = max(0, int(x1 - px)), max(0, int(y1 - py))
-        rx2, ry2 = min(w, int(x2 + px)), min(h, int(y2 + py))
-        num_rgb = rgb[ry1:ry2, rx1:rx2]
-        if num_rgb.size == 0:
-            return None, p_leg
-        # 3. read it (PARSeq, digit-filtered)
-        rd_in = self.read_tf(cv2.resize(num_rgb, (128, 32),
-                                        interpolation=cv2.INTER_CUBIC)).unsqueeze(0).to(self.device)
-        with torch.no_grad():
-            logits = self.reader(rd_in)
-        text, conf = self.reader.tokenizer.decode(logits.softmax(-1))
-        num = "".join(ch for ch in text[0] if ch.isdigit())
-        c = float(conf[0].min()) if len(conf[0]) else 0.0
-        if not num or len(num) > 2 or c < READ_MIN:
-            return None, c
-        return num, c
+        out: list[tuple[str | None, float]] = [(None, 0.0)] * len(crops_bgr)
+        valid = [(i, c) for i, c in enumerate(crops_bgr) if c is not None and c.size]
+        if not valid:
+            return out
+        rgbs = {i: cv2.cvtColor(c, cv2.COLOR_BGR2RGB) for i, c in valid}
+        # 1. legibility gate (trained at 160x96), batched
+        survivors: list[int] = []
+        for s in range(0, len(valid), sub_batch):
+            chunk = valid[s:s + sub_batch]
+            batch = torch.stack([self.leg_tf(cv2.resize(rgbs[i], (96, 160)))
+                                 for i, _ in chunk]).to(self.device)
+            with torch.no_grad():
+                p = torch.softmax(self.legibility(batch), 1)[:, 1].tolist()
+            for (i, _), p_leg in zip(chunk, p):
+                out[i] = (None, p_leg)
+                if p_leg >= LEGIBLE_MIN:
+                    survivors.append(i)
+        if not survivors:
+            return out
+        # 2. localize the number, batched
+        num_imgs: list = []
+        num_idx: list[int] = []
+        for s in range(0, len(survivors), loc_batch):
+            chunk = survivors[s:s + loc_batch]
+            results = self.localizer.predict([crops_bgr[i] for i in chunk], imgsz=640,
+                                             conf=LOC_MIN, verbose=False,
+                                             device=self.device, batch=loc_batch)
+            for i, res in zip(chunk, results):
+                if res.boxes is None or len(res.boxes) == 0:
+                    continue
+                k = int(res.boxes.conf.argmax())
+                x1, y1, x2, y2 = (float(v) for v in res.boxes.xyxy[k])
+                h, w = crops_bgr[i].shape[:2]
+                px, py = (x2 - x1) * PAD, (y2 - y1) * PAD
+                rx1, ry1 = max(0, int(x1 - px)), max(0, int(y1 - py))
+                rx2, ry2 = min(w, int(x2 + px)), min(h, int(y2 + py))
+                num_rgb = rgbs[i][ry1:ry2, rx1:rx2]
+                if num_rgb.size == 0:
+                    continue
+                num_imgs.append(cv2.resize(num_rgb, (128, 32),
+                                           interpolation=cv2.INTER_CUBIC))
+                num_idx.append(i)
+        if not num_imgs:
+            return out
+        # 3. read them (PARSeq, digit-filtered), batched
+        for s in range(0, len(num_imgs), sub_batch):
+            batch = torch.stack([self.read_tf(m) for m in
+                                 num_imgs[s:s + sub_batch]]).to(self.device)
+            with torch.no_grad():
+                logits = self.reader(batch)
+            texts, confs = self.reader.tokenizer.decode(logits.softmax(-1))
+            for i, text, conf in zip(num_idx[s:s + sub_batch], texts, confs):
+                num = "".join(ch for ch in text if ch.isdigit())
+                c = float(conf.min()) if len(conf) else 0.0
+                if num and len(num) <= 2 and c >= READ_MIN:
+                    out[i] = (num, c)
+                else:
+                    out[i] = (None, c)
+        return out
 
 
 MIN_VOTES = 2               # commit a track's number only on >=2 agreeing reads...
