@@ -1,0 +1,20 @@
+{
+ "game": "e6fba750",
+ "court": "court-a",
+ "three_pt_r_cm": 670.6,
+ "four_pt_r_cm": {
+  "L": 949.5,
+  "R": 939.8
+ },
+ "baskets": {
+  "L": [
+   107.7,
+   713.2
+  ],
+  "R": [
+   2035.9999999999998,
+   713.2
+  ]
+ },
+ "rule": "shot points from shooter's feet at release: d<670.6 -> 2PT; 670.6<=d<four_pt -> 3PT; d>=four_pt -> 4PT (d = distance to ATTACKED basket)"
+}
