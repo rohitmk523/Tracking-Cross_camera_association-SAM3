@@ -126,6 +126,16 @@ laptop ~4-7 min per game-minute.**
 7. **CoreML/ANE export of the hot models on the Mac** (yolo26s via ultralytics
    CoreML export; legibility + PARSeq via coremltools). Pose already proves the
    ANE path (274 crops/s). Expected 2-3× on detect + OCR locally.
+   **DETECTOR RESULT (2026-07-11): CoreML export of yolo26s is BLOCKED upstream**
+   — coremltools (9.0 and 8.3, torch 2.12 and 2.7 alike) fails converting the
+   yolo26 attention block ('int' op, `10/m/0/attn`). ONNX exports fine, but
+   onnxruntime's CoreML provider fragments the graph (361/384 nodes, 9
+   partitions) and runs 19.6 fps vs torch-MPS 45.7 → **detection stays on MPS**.
+   Re-try CoreML after ultralytics/coremltools fix the attn op. The CoreML/ANE
+   effort now targets the OCR stack (ResNet18 legibility + PARSeq: plain ops,
+   should convert cleanly; OCR is the larger budget item at 188s vs 160s).
+   Note: none of this affects the AGX — TensorRT engines build from ONNX/PT
+   directly on-device and yolo26 is TensorRT-supported.
 8. **4th-class pilot: add "number" to yolo26s** (labels exist in Uball OCR Master,
    HF-backed). One inference pass then emits player+referee+ball+number boxes —
    the localizer stage is DELETED and number boxes come free at detection time.
