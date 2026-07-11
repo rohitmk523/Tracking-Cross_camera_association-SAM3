@@ -259,6 +259,44 @@ What that means, honestly:
   decision rule, ~$10 total) is written up in
   `Training_frameworks/Uball 4Cam Detection/YOLO_TRAINING_PLAN.md`.
 
+### The detector race — RESULTS (measured, not benchmarked)
+
+We trained three YOLO candidates (11-small, 11-medium, 26-small) on our own labelled
+footage — the exact dataset the incumbent RF-DETR was trained on — and raced all
+four detectors **end-to-end**: raw video in, full pipeline (detection → jersey
+reading → skeletons → kit tags → tracking → cross-camera correction) rebuilt from
+scratch per detector with nothing shared between runs, on a one-minute window of a
+blind game with full human ground truth for three players (including a same-number
+pair on opposite teams — the hardest identity case). Identity accuracy is graded two
+ways: **strict** (the player must be correct in *every* camera that sees him) and
+**fused** (correct in at least one camera — what the product consumes).
+
+| Detector | Strict | Fused | Pipeline time (1 game-min, cloud GPU) | Detection speed | License |
+|---|---|---|---|---|---|
+| **RF-DETR-S FP16** (incumbent) | **81.0%** | **85.6%** | 29.4 min | 24.5 fps | Apache-2.0 |
+| **yolo26s** | 78.9% | 84.6% | 26.1 min | 63.4 fps | AGPL/commercial |
+| yolo11s | 76.6% | 84.4% | 26.3 min | 67.2 fps | AGPL/commercial |
+| yolo11m | 76.2% | 81.6% | 26.0 min | 60.3 fps | AGPL/commercial |
+
+What the race says:
+- **RF-DETR remains the accuracy leader** — it wins both strict and fused on the
+  blind window, and stays the reference detector for accuracy-grade output.
+- **yolo26s is the clear edge/live candidate**: best YOLO on both metrics, within
+  1 point of RF-DETR on the fused (product) metric, detects 2.6× faster, and — the
+  decisive practical point — drops directly into the venue box's live streaming
+  runtime (DeepStream/TensorRT), which the transformer-based RF-DETR does not
+  without custom engineering. It also produced the most confident jersey reads of
+  all four detectors (+13% over RF-DETR), meaning more identity anchors for the
+  correction layer.
+- **Detection is no longer the pipeline's bottleneck.** With any YOLO, detection is
+  ~7% of pipeline time; jersey OCR and kit-tagging now dominate (~80%) and are the
+  next optimization target (triggered reads instead of every-frame reads, batched
+  inference, crop reuse — projected to cut pipeline time by ~3-4×).
+- A lab-benchmark lesson worth recording: yolo11m scored the *best* detection mAP of
+  all four models yet tracked *worst* — benchmark numbers do not order real pipeline
+  outcomes; only end-to-end measurement does. This is why we race detectors instead
+  of reading spec sheets.
+
 **Ball detection & possession — separate workstream, groundwork laid.** The
 detection dataset already includes the ball as a first-class label (~1,580 ball
 boxes across train/valid/test, built from the same annotation tooling), so any

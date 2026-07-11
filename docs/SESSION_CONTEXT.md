@@ -128,17 +128,39 @@ Consequence for judging: the strict all-angles metric over-punishes far-cam miss
 relative to the product; the detector winner is judged on BOTH strict AND fused
 (≥1-cam) coverage, plus speed.
 
-**Detector decision procedure (when yolo26s lands, ~pending):**
-1. Per-class val (ball!) for yolo26s.
-2. Pipeline gate on the SAME e6 window: report strict AND fused per detector.
-3. Race lane: add yolo26s (and yolo11m) to the A10G race
-   (current: RF-DETR-FP16 24.4fps/$3.97 · yolo11s 67fps/$1.45).
-4. Pick ONE winner across accuracy(strict+fused)/speed/license → it becomes the
-   pipeline's detector everywhere. Record the final 4-way table in STATUS Part 6.
+**Detector race: DONE (2026-07-11). E2E race replaced the e6 gate** — user correctly
+called the e6 Level-2 gate contaminated (jersey anchors were RF-DETR-derived and
+shared across lanes = "cheating"); the E2E race rebuilds EVERYTHING per lane from
+raw video on the c2a GT minute (scripts/e2e_race.py + aws_e2e_race_job.py; grading
+via GT_DETS_DIR; kit-copy step required for dual streams — n3→n3B/n3W).
 
-**Results so far:** RF-DETR 83.2% strict (champion) · yolo11s 81.8%, 2.7× faster ·
-yolo11m 80.0% (mAP winner, pipeline loser — KEY LESSON: benchmark mAP does not
-order pipeline outcomes; box consistency/mAP50-95 correlates better).
+**FINAL TABLE (c2a354fe_300_60, A10G):**
+| lane | strict | fused | e2e 1min | det fps | reads |
+|---|---|---|---|---|---|
+| RF-DETR-S FP16 | .810 | .856 | 1765s | 24.5 | 6191 |
+| yolo26s | .789 | .846 | 1568s | 63.4 | 6983 |
+| yolo11s | .766 | .844 | 1578s | 67.2 | 6857 |
+| yolo11m | .762 | .816 | 1560s | 60.3 | 6756 |
+
+**Verdict:** RF-DETR = accuracy reference (wins both metrics). yolo26s = edge/live
+candidate (best YOLO, fused −1.0pt, 2.6× det speed, DeepStream/TensorRT drop-in on
+the new AGX streaming box, MOST jersey reads). User to visually confirm
+(runs/tracking/demo_allplayers_yolo26s_c2a354fe.mp4 vs demo_allplayers_c2a354fe.mp4).
+Stage split (any YOLO lane): OCR 53% + kits 27% + pose 11% + detect 7% → OCR/kits
+are the realtime frontier, NOT detection. Laptop (M1): yolo26s 45.7fps measured;
+full pipeline ≈30-45 min/game-min unoptimized. Old e6 gate numbers (81.8/80.0)
+SUPERSEDED. yolo26s L1 valid: player .960 / ball .855 (−4.2). mAP lesson holds
+(11m best mAP, worst pipeline).
+
+**Jetson AGX live streaming (new workstream):** new box runs DeepStream 7.1 + NDI
+ingest (uspaces-docker → bauersan/jetson-ndi-yolo image; old GoPro/dual-Nano stack
+in gopro-automation-linux is the record→S3→cloud flow). Design = TWO-PASS: live
+pass on AGX (TensorRT winner + tracker + TRIGGERED OCR per user's assisted-OCR
+idea: new/low-conf/heartbeat-only reads) + finalization pass (full anchor
+interpolation, needs future reads → rolling delay or post-game on recording).
+Engineer questionnaire: docs/JETSON_STREAMING_QUESTIONS.md (21 Qs; key: NDI vs
+GigE path, stream sync/audio, recording co-exists?, roster at stream start,
+1 AGX per court?).
 
 **Post-winner agenda (in order):**
 1. Adopt winner into all prep jobs + dets caches; re-baseline e6/c2a numbers.
