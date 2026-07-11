@@ -58,6 +58,17 @@ bit-identical or trivially equivalent; gate = scores unchanged on both GT window
 **Phase 1 exit estimate: ~1,570s → ~450-550s per game-minute (A10G),
 laptop ~8-12 min per game-minute.** Zero accuracy risk.
 
+**PHASE 1 RESULT (2026-07-11, measured on the laptop, commit 78c1fd1):**
+OCR 4-cam 813s(A10G) → **82s local** (~200-250 crops/s vs ~22/s unbatched local);
+kit stage 417s → **0.12s** (inline shades + clustering, no re-decode). Combined
+OCR+kits **15×**. GT gate PASSED: c2a strict 0.811 / fused 0.850 vs 0.810/0.856
+reference (within established run-to-run noise; identical kit-split decisions;
+FL event-level check 99.1% identical events, 99.7% number agreement).
+New laptop total ≈ detect 160s + pose 150s + OCR 82s + track/xcam 65s ≈
+**~7.5 min per game-minute** (from ~35-45). Single-decode consolidation deferred —
+remaining decode cost is inside detect/pose passes, now a Phase-2 item alongside
+stride-2.
+
 ## Phase 2 — Reduce work (each step has an accuracy gate)
 
 4. **Triggered ("assisted") OCR** — the user-specified design, now formalized.
