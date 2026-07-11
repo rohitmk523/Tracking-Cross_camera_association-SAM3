@@ -37,7 +37,8 @@ WEIGHTS = "runs/yolo26s-1280-ourdata-v1_fetch/runs/detect/runs/yolo26s-1280-ourd
 
 def userdata(bundle_url, video_urls, chunks, results_url, log_url, gid8, offsets) -> str:
     dls = "\n".join(
-        f'curl -s -L "{u}" -o "videos/{gid8}_{ang}.mp4" &' for ang, u in video_urls.items())
+        f'curl -s -L "{u}" -o "videos/{gid8}_{ang}.mp4" & DLPIDS="$DLPIDS $!"'
+        for ang, u in video_urls.items())
     chunk_lines = " ".join(f"{s}_{d}" for s, d in chunks)
     return f"""#!/bin/bash
 exec > /var/log/prep.log 2>&1
@@ -63,8 +64,9 @@ export PYTHONPATH=/work/src
 mkdir -p videos data/clips runs/dets_cache runs/anchors runs/pose_cache runs/jersey out
 cp jersey/*.pt runs/jersey/
 echo "[dl] full-game videos (in-region)"
+DLPIDS=""
 {dls}
-wait
+wait $DLPIDS
 ls -la videos/
 RC=0
 for CH in {chunk_lines}; do
