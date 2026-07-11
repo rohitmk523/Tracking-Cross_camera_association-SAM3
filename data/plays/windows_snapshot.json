@@ -1,0 +1,477 @@
+{
+ "snapshot_note": "plays table windows around our 5 scored windows, joined to players.jersey_number (project mhbrsftxvxxtfgbajrlc, 2026-07-08)",
+ "rows": [
+  {
+   "gid8": "29b51d57",
+   "ts": 476,
+   "classification": "OTHER",
+   "player_a": "Bryan Zomarriba",
+   "player_b": null,
+   "jersey_a": 8,
+   "jersey_b": null
+  },
+  {
+   "gid8": "29b51d57",
+   "ts": 483.6,
+   "classification": "3PT_MISS",
+   "player_a": "Thomas Latham",
+   "player_b": null,
+   "jersey_a": 9,
+   "jersey_b": null
+  },
+  {
+   "gid8": "29b51d57",
+   "ts": 485.9,
+   "classification": "REBOUND",
+   "player_a": "Carlos Solis",
+   "player_b": null,
+   "jersey_a": 2,
+   "jersey_b": null
+  },
+  {
+   "gid8": "29b51d57",
+   "ts": 493.9,
+   "classification": "3PT_MISS",
+   "player_a": "Bryan Zomarriba",
+   "player_b": null,
+   "jersey_a": 8,
+   "jersey_b": null
+  },
+  {
+   "gid8": "29b51d57",
+   "ts": 496.3,
+   "classification": "REBOUND",
+   "player_a": "Thomas Latham",
+   "player_b": null,
+   "jersey_a": 9,
+   "jersey_b": null
+  },
+  {
+   "gid8": "29b51d57",
+   "ts": 506.1,
+   "classification": "FG_MISS",
+   "player_a": "Javier Pita",
+   "player_b": null,
+   "jersey_a": 3,
+   "jersey_b": null
+  },
+  {
+   "gid8": "29b51d57",
+   "ts": 522.1,
+   "classification": "FG_MAKE",
+   "player_a": "Carlos Solis",
+   "player_b": null,
+   "jersey_a": 2,
+   "jersey_b": null
+  },
+  {
+   "gid8": "29b51d57",
+   "ts": 541.5,
+   "classification": "FG_MAKE",
+   "player_a": "Julio Valle",
+   "player_b": null,
+   "jersey_a": 0,
+   "jersey_b": null
+  },
+  {
+   "gid8": "922bff3b",
+   "ts": 755.3,
+   "classification": "FG_MISS",
+   "player_a": "Matthew Mairena",
+   "player_b": null,
+   "jersey_a": 2,
+   "jersey_b": null
+  },
+  {
+   "gid8": "922bff3b",
+   "ts": 756.9,
+   "classification": "REBOUND",
+   "player_a": "Jose G. Carreno",
+   "player_b": null,
+   "jersey_a": 8,
+   "jersey_b": null
+  },
+  {
+   "gid8": "922bff3b",
+   "ts": 765.4,
+   "classification": "3PT_MISS",
+   "player_a": "Jose G. Carreno",
+   "player_b": null,
+   "jersey_a": 8,
+   "jersey_b": null
+  },
+  {
+   "gid8": "922bff3b",
+   "ts": 766.9,
+   "classification": "REBOUND",
+   "player_a": "Jose G. Carreno",
+   "player_b": null,
+   "jersey_a": 8,
+   "jersey_b": null
+  },
+  {
+   "gid8": "922bff3b",
+   "ts": 771,
+   "classification": "FG_MISS",
+   "player_a": "Roberto Yapp",
+   "player_b": null,
+   "jersey_a": 30,
+   "jersey_b": null
+  },
+  {
+   "gid8": "922bff3b",
+   "ts": 772.4,
+   "classification": "REBOUND",
+   "player_a": "5 Unnamed Player",
+   "player_b": null,
+   "jersey_a": 5,
+   "jersey_b": null
+  },
+  {
+   "gid8": "922bff3b",
+   "ts": 780.2,
+   "classification": "3PT_MISS",
+   "player_a": "Anthony Salazar",
+   "player_b": null,
+   "jersey_a": 1,
+   "jersey_b": null
+  },
+  {
+   "gid8": "922bff3b",
+   "ts": 782.8,
+   "classification": "REBOUND",
+   "player_a": "Neyser Rodriguez",
+   "player_b": null,
+   "jersey_a": 5,
+   "jersey_b": null
+  },
+  {
+   "gid8": "922bff3b",
+   "ts": 790,
+   "classification": "3PT_MISS",
+   "player_a": "Seth Wolfson",
+   "player_b": null,
+   "jersey_a": 10,
+   "jersey_b": null
+  },
+  {
+   "gid8": "922bff3b",
+   "ts": 792,
+   "classification": "REBOUND",
+   "player_a": "Jose G. Carreno",
+   "player_b": null,
+   "jersey_a": 8,
+   "jersey_b": null
+  },
+  {
+   "gid8": "922bff3b",
+   "ts": 795,
+   "classification": "OTHER",
+   "player_a": "Jose G. Carreno",
+   "player_b": null,
+   "jersey_a": 8,
+   "jersey_b": null
+  },
+  {
+   "gid8": "922bff3b",
+   "ts": 809.9,
+   "classification": "4PT_MISS",
+   "player_a": "Matthew Mairena",
+   "player_b": null,
+   "jersey_a": 2,
+   "jersey_b": null
+  },
+  {
+   "gid8": "922bff3b",
+   "ts": 811.9,
+   "classification": "REBOUND",
+   "player_a": "Jose G. Carreno",
+   "player_b": null,
+   "jersey_a": 8,
+   "jersey_b": null
+  },
+  {
+   "gid8": "922bff3b",
+   "ts": 819.5,
+   "classification": "3PT_MISS",
+   "player_a": "Pedro Ignacio Cano",
+   "player_b": null,
+   "jersey_a": 3,
+   "jersey_b": null
+  },
+  {
+   "gid8": "922bff3b",
+   "ts": 821.9,
+   "classification": "REBOUND",
+   "player_a": "Matthew Mairena",
+   "player_b": null,
+   "jersey_a": 2,
+   "jersey_b": null
+  },
+  {
+   "gid8": "922bff3b",
+   "ts": 828.4,
+   "classification": "FG_MAKE",
+   "player_a": "5 Unnamed Player",
+   "player_b": null,
+   "jersey_a": 5,
+   "jersey_b": null
+  },
+  {
+   "gid8": "b3c1f62c",
+   "ts": 1351.1,
+   "classification": "FREE_THROW_MISS",
+   "player_a": "Andrew Mendez",
+   "player_b": null,
+   "jersey_a": 4,
+   "jersey_b": null
+  },
+  {
+   "gid8": "b3c1f62c",
+   "ts": 1361.5,
+   "classification": "FREE_THROW_MAKE",
+   "player_a": "Andrew Mendez",
+   "player_b": null,
+   "jersey_a": 4,
+   "jersey_b": null
+  },
+  {
+   "gid8": "b3c1f62c",
+   "ts": 1383.2,
+   "classification": "3PT_MISS",
+   "player_a": "Aneli Cutie",
+   "player_b": null,
+   "jersey_a": 5,
+   "jersey_b": null
+  },
+  {
+   "gid8": "b3c1f62c",
+   "ts": 1389.2,
+   "classification": "3PT_MISS",
+   "player_a": "Andrew Mendez",
+   "player_b": null,
+   "jersey_a": 4,
+   "jersey_b": null
+  },
+  {
+   "gid8": "b3c1f62c",
+   "ts": 1393.4,
+   "classification": "FG_MAKE",
+   "player_a": "Javier Serrano",
+   "player_b": "Aneli Cutie",
+   "jersey_a": 6,
+   "jersey_b": 5
+  },
+  {
+   "gid8": "c2a354fe",
+   "ts": 309.2,
+   "classification": "4PT_MAKE",
+   "player_a": "Kevin Villarreal",
+   "player_b": null,
+   "jersey_a": 3,
+   "jersey_b": null
+  },
+  {
+   "gid8": "c2a354fe",
+   "ts": 322.3,
+   "classification": "3PT_MISS",
+   "player_a": "Richard Li",
+   "player_b": null,
+   "jersey_a": 1,
+   "jersey_b": null
+  },
+  {
+   "gid8": "c2a354fe",
+   "ts": 326.1,
+   "classification": "REBOUND",
+   "player_a": "Miles Torres-Grand",
+   "player_b": null,
+   "jersey_a": 8,
+   "jersey_b": null
+  },
+  {
+   "gid8": "c2a354fe",
+   "ts": 334.6,
+   "classification": "3PT_MISS",
+   "player_a": "Jeremy Bull",
+   "player_b": null,
+   "jersey_a": 3,
+   "jersey_b": null
+  },
+  {
+   "gid8": "c2a354fe",
+   "ts": 336.1,
+   "classification": "REBOUND",
+   "player_a": "Kevin Villarreal",
+   "player_b": null,
+   "jersey_a": 3,
+   "jersey_b": null
+  },
+  {
+   "gid8": "c2a354fe",
+   "ts": 339.6,
+   "classification": "4PT_MISS",
+   "player_a": "Kevin Villarreal",
+   "player_b": null,
+   "jersey_a": 3,
+   "jersey_b": null
+  },
+  {
+   "gid8": "c2a354fe",
+   "ts": 343.8,
+   "classification": "REBOUND",
+   "player_a": "Jeremy Bull",
+   "player_b": null,
+   "jersey_a": 3,
+   "jersey_b": null
+  },
+  {
+   "gid8": "c2a354fe",
+   "ts": 348.4,
+   "classification": "FG_MAKE",
+   "player_a": "Richard Li",
+   "player_b": null,
+   "jersey_a": 1,
+   "jersey_b": null
+  },
+  {
+   "gid8": "e6fba750",
+   "ts": 8.8,
+   "classification": "FG_MISS",
+   "player_a": "Tajzmere Divine McKnight",
+   "player_b": null,
+   "jersey_a": 22,
+   "jersey_b": null
+  },
+  {
+   "gid8": "e6fba750",
+   "ts": 12.7,
+   "classification": "4PT_MISS",
+   "player_a": "Dioscar Gregorio Gomez",
+   "player_b": null,
+   "jersey_a": 11,
+   "jersey_b": null
+  },
+  {
+   "gid8": "e6fba750",
+   "ts": 28.8,
+   "classification": "FG_MAKE",
+   "player_a": "Bryant Besu",
+   "player_b": "Bryant Besu",
+   "jersey_a": 90,
+   "jersey_b": 90
+  },
+  {
+   "gid8": "e6fba750",
+   "ts": 44,
+   "classification": "FG_MISS",
+   "player_a": "Daniel Mark Baad",
+   "player_b": null,
+   "jersey_a": 25,
+   "jersey_b": null
+  },
+  {
+   "gid8": "e6fba750",
+   "ts": 46.5,
+   "classification": "REBOUND",
+   "player_a": "Fui Martinez",
+   "player_b": null,
+   "jersey_a": 43,
+   "jersey_b": null
+  },
+  {
+   "gid8": "e6fba750",
+   "ts": 60.9,
+   "classification": "3PT_MISS",
+   "player_a": "Fui Martinez",
+   "player_b": null,
+   "jersey_a": 43,
+   "jersey_b": null
+  },
+  {
+   "gid8": "e6fba750",
+   "ts": 63.5,
+   "classification": "REBOUND",
+   "player_a": "Dioscar Gregorio Gomez",
+   "player_b": null,
+   "jersey_a": 11,
+   "jersey_b": null
+  },
+  {
+   "gid8": "e6fba750",
+   "ts": 68.2,
+   "classification": "BLOCK",
+   "player_a": "Bryant Besu",
+   "player_b": null,
+   "jersey_a": 90,
+   "jersey_b": null
+  },
+  {
+   "gid8": "e6fba750",
+   "ts": 70.8,
+   "classification": "REBOUND",
+   "player_a": "Tajzmere Divine McKnight",
+   "player_b": null,
+   "jersey_a": 22,
+   "jersey_b": null
+  },
+  {
+   "gid8": "e6fba750",
+   "ts": 77.6,
+   "classification": "FG_MAKE",
+   "player_a": "Dioscar Gregorio Gomez",
+   "player_b": null,
+   "jersey_a": 11,
+   "jersey_b": null
+  },
+  {
+   "gid8": "e6fba750",
+   "ts": 91.6,
+   "classification": "FG_MAKE",
+   "player_a": "Brayan Delgado",
+   "player_b": null,
+   "jersey_a": 6,
+   "jersey_b": null
+  },
+  {
+   "gid8": "e6fba750",
+   "ts": 101.9,
+   "classification": "4PT_MAKE",
+   "player_a": "Fui Martinez",
+   "player_b": "Brayan Delgado",
+   "jersey_a": 43,
+   "jersey_b": 6
+  },
+  {
+   "gid8": "e6fba750",
+   "ts": 122.7,
+   "classification": "3PT_MISS",
+   "player_a": "Tajzmere Divine McKnight",
+   "player_b": null,
+   "jersey_a": 22,
+   "jersey_b": null
+  },
+  {
+   "gid8": "e6fba750",
+   "ts": 124.8,
+   "classification": "REBOUND",
+   "player_a": "Bryant Besu",
+   "player_b": null,
+   "jersey_a": 90,
+   "jersey_b": null
+  }
+ ],
+ "roster_e6fba750": {
+  "0": "Jordan Davis",
+  "1": "Truth Veritas",
+  "6": "Michael Fernandez / Brayan Delgado",
+  "8": "Christian Amado",
+  "10": "Jeff Vargas",
+  "11": "Dioscar Gregorio Gomez",
+  "22": "Tajzmere Divine McKnight",
+  "25": "Daniel Mark Baad",
+  "43": "Fui Martinez",
+  "55": "Andre Del Castillo",
+  "90": "Bryant Besu"
+ }
+}

@@ -1,0 +1,231 @@
+{
+ "game": "e6fba750",
+ "window": "600_600",
+ "clip_t0": 600.0,
+ "plays": [
+  {
+   "t": 603.1,
+   "cls": "FREE_THROW_MISS",
+   "a": "Andre Del Castillo"
+  },
+  {
+   "t": 604.9,
+   "cls": "REBOUND",
+   "a": "Bryant Besu"
+  },
+  {
+   "t": 615.3,
+   "cls": "4PT_MISS",
+   "a": "Truth Veritas"
+  },
+  {
+   "t": 616.9,
+   "cls": "REBOUND",
+   "a": "Andre Del Castillo"
+  },
+  {
+   "t": 625.7,
+   "cls": "FG_MISS",
+   "a": "Jeff Vargas"
+  },
+  {
+   "t": 626.7,
+   "cls": "REBOUND",
+   "a": "Truth Veritas"
+  },
+  {
+   "t": 630.5,
+   "cls": "FG_MAKE",
+   "a": "Brayan Delgado"
+  },
+  {
+   "t": 641.2,
+   "cls": "4PT_MISS",
+   "a": "Brayan Delgado"
+  },
+  {
+   "t": 643.2,
+   "cls": "REBOUND",
+   "a": "Dioscar Gregorio Gomez"
+  },
+  {
+   "t": 650.1,
+   "cls": "FG_MISS",
+   "a": "Michael Fernandez"
+  },
+  {
+   "t": 652,
+   "cls": "REBOUND",
+   "a": "Dioscar Gregorio Gomez"
+  },
+  {
+   "t": 655,
+   "cls": "FG_MAKE",
+   "a": "Andre Del Castillo"
+  },
+  {
+   "t": 672.8,
+   "cls": "FOUL",
+   "a": "Fui Martinez"
+  },
+  {
+   "t": 696.6,
+   "cls": "FREE_THROW_MAKE",
+   "a": "Fui Martinez"
+  },
+  {
+   "t": 705.3,
+   "cls": "FREE_THROW_MAKE",
+   "a": "Fui Martinez"
+  },
+  {
+   "t": 719.9,
+   "cls": "FG_MISS",
+   "a": "Dioscar Gregorio Gomez"
+  },
+  {
+   "t": 721.4,
+   "cls": "REBOUND",
+   "a": "Truth Veritas"
+  },
+  {
+   "t": 772,
+   "cls": "FG_MISS",
+   "a": "Brayan Delgado"
+  },
+  {
+   "t": 779.9,
+   "cls": "REBOUND",
+   "a": "Andre Del Castillo"
+  },
+  {
+   "t": 787.1,
+   "cls": "4PT_MAKE",
+   "a": "Andre Del Castillo"
+  },
+  {
+   "t": 808.4,
+   "cls": "FOUL",
+   "a": "Bryant Besu"
+  },
+  {
+   "t": 827,
+   "cls": "FREE_THROW_MISS",
+   "a": "Bryant Besu"
+  },
+  {
+   "t": 839.5,
+   "cls": "FREE_THROW_MISS",
+   "a": "Bryant Besu"
+  },
+  {
+   "t": 850.5,
+   "cls": "FG_MISS",
+   "a": "Andre Del Castillo"
+  },
+  {
+   "t": 857.9,
+   "cls": "3PT_MAKE",
+   "a": "Fui Martinez",
+   "b": "Bryant Besu"
+  },
+  {
+   "t": 868.5,
+   "cls": "FG_MAKE",
+   "a": "Dioscar Gregorio Gomez"
+  },
+  {
+   "t": 878.1,
+   "cls": "FOUL",
+   "a": "Bryant Besu"
+  },
+  {
+   "t": 898.8,
+   "cls": "4PT_MISS",
+   "a": "Andre Del Castillo"
+  },
+  {
+   "t": 900.8,
+   "cls": "REBOUND",
+   "a": "Michael Fernandez"
+  },
+  {
+   "t": 914.2,
+   "cls": "FG_MAKE",
+   "a": "Dioscar Gregorio Gomez"
+  },
+  {
+   "t": 947,
+   "cls": "FOUL",
+   "a": "Andre Del Castillo"
+  },
+  {
+   "t": 968.2,
+   "cls": "FREE_THROW_MAKE",
+   "a": "Fui Martinez"
+  },
+  {
+   "t": 983.3,
+   "cls": "FREE_THROW_MAKE",
+   "a": "Fui Martinez"
+  },
+  {
+   "t": 998.2,
+   "cls": "4PT_MISS",
+   "a": "Jeff Vargas"
+  },
+  {
+   "t": 998.9,
+   "cls": "REBOUND",
+   "a": "Bryant Besu"
+  },
+  {
+   "t": 1008.6,
+   "cls": "FG_MISS",
+   "a": "Fui Martinez"
+  },
+  {
+   "t": 1010,
+   "cls": "REBOUND",
+   "a": "Fui Martinez"
+  },
+  {
+   "t": 1014.7,
+   "cls": "4PT_MAKE",
+   "a": "Brayan Delgado",
+   "b": "Fui Martinez"
+  },
+  {
+   "t": 1031.2,
+   "cls": "3PT_MAKE",
+   "a": "Tajzmere Divine McKnight",
+   "b": "Christian Amado"
+  },
+  {
+   "t": 1049.1,
+   "cls": "3PT_MAKE",
+   "a": "Fui Martinez",
+   "b": "Bryant Besu"
+  },
+  {
+   "t": 1067.2,
+   "cls": "TURNOVER",
+   "a": "Andre Del Castillo"
+  },
+  {
+   "t": 1074.7,
+   "cls": "TURNOVER",
+   "a": "Fui Martinez"
+  },
+  {
+   "t": 1088.1,
+   "cls": "FG_MISS",
+   "a": "Jeff Vargas"
+  },
+  {
+   "t": 1091.1,
+   "cls": "REBOUND",
+   "a": "Truth Veritas"
+  }
+ ]
+}

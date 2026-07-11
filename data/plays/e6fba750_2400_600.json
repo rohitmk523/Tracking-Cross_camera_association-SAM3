@@ -1,0 +1,186 @@
+{
+ "game": "e6fba750",
+ "window": "2400_600",
+ "clip_t0": 2400.0,
+ "plays": [
+  {
+   "t": 2401.6,
+   "cls": "FG_MISS",
+   "a": "Jeff Vargas"
+  },
+  {
+   "t": 2404.8,
+   "cls": "REBOUND",
+   "a": "Jordan Davis"
+  },
+  {
+   "t": 2432.6,
+   "cls": "FG_MISS",
+   "a": "Bryant Besu"
+  },
+  {
+   "t": 2433.2,
+   "cls": "REBOUND",
+   "a": "Dioscar Gregorio Gomez"
+  },
+  {
+   "t": 2469.3,
+   "cls": "4PT_MISS",
+   "a": "Jeff Vargas"
+  },
+  {
+   "t": 2525.4,
+   "cls": "FG_MISS",
+   "a": "Tajzmere Divine McKnight"
+  },
+  {
+   "t": 2530.3,
+   "cls": "REBOUND",
+   "a": "Bryant Besu"
+  },
+  {
+   "t": 2569.9,
+   "cls": "4PT_MAKE",
+   "a": "Jeff Vargas"
+  },
+  {
+   "t": 2586.9,
+   "cls": "FG_MAKE",
+   "a": "Fui Martinez"
+  },
+  {
+   "t": 2606,
+   "cls": "FREE_THROW_MAKE",
+   "a": "Fui Martinez"
+  },
+  {
+   "t": 2659.5,
+   "cls": "FG_MAKE",
+   "a": "Brayan Delgado",
+   "b": "Fui Martinez"
+  },
+  {
+   "t": 2690.8,
+   "cls": "3PT_MISS",
+   "a": "Fui Martinez"
+  },
+  {
+   "t": 2693.7,
+   "cls": "REBOUND",
+   "a": "Truth Veritas"
+  },
+  {
+   "t": 2696.4,
+   "cls": "4PT_MISS",
+   "a": "Brayan Delgado"
+  },
+  {
+   "t": 2698.9,
+   "cls": "REBOUND",
+   "a": "Dioscar Gregorio Gomez"
+  },
+  {
+   "t": 2701.5,
+   "cls": "4PT_MISS",
+   "a": "Jeff Vargas"
+  },
+  {
+   "t": 2704.7,
+   "cls": "REBOUND",
+   "a": "Brayan Delgado"
+  },
+  {
+   "t": 2707.9,
+   "cls": "3PT_MISS",
+   "a": "Fui Martinez"
+  },
+  {
+   "t": 2712.3,
+   "cls": "REBOUND",
+   "a": "Truth Veritas"
+  },
+  {
+   "t": 2815.5,
+   "cls": "FG_MAKE",
+   "a": "Bryant Besu"
+  },
+  {
+   "t": 2832.8,
+   "cls": "FG_MISS",
+   "a": "Jordan Davis"
+  },
+  {
+   "t": 2836.4,
+   "cls": "3PT_MISS",
+   "a": "Andre Del Castillo"
+  },
+  {
+   "t": 2839.6,
+   "cls": "REBOUND",
+   "a": "Bryant Besu"
+  },
+  {
+   "t": 2858,
+   "cls": "FG_MAKE",
+   "a": "Bryant Besu",
+   "b": "Fui Martinez"
+  },
+  {
+   "t": 2875,
+   "cls": "FOUL",
+   "a": "Andre Del Castillo"
+  },
+  {
+   "t": 2902.9,
+   "cls": "FREE_THROW_MISS",
+   "a": "Jordan Davis"
+  },
+  {
+   "t": 2905.8,
+   "cls": "REBOUND",
+   "a": "Tajzmere Divine McKnight"
+  },
+  {
+   "t": 2914.1,
+   "cls": "4PT_MISS",
+   "a": "Jeff Vargas"
+  },
+  {
+   "t": 2915.9,
+   "cls": "REBOUND",
+   "a": "Fui Martinez"
+  },
+  {
+   "t": 2927.6,
+   "cls": "4PT_MAKE",
+   "a": "Brayan Delgado",
+   "b": "Fui Martinez"
+  },
+  {
+   "t": 2940.1,
+   "cls": "4PT_MISS",
+   "a": "Tajzmere Divine McKnight"
+  },
+  {
+   "t": 2941.9,
+   "cls": "REBOUND",
+   "a": "Bryant Besu"
+  },
+  {
+   "t": 2952.1,
+   "cls": "4PT_MISS",
+   "a": "Brayan Delgado"
+  },
+  {
+   "t": 2970.2,
+   "cls": "FG_MAKE",
+   "a": "Jordan Davis",
+   "b": "Brayan Delgado"
+  },
+  {
+   "t": 2985.9,
+   "cls": "FOUL",
+   "a": "Jordan Davis"
+  }
+ ]
+}

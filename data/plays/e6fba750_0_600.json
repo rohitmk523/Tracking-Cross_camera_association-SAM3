@@ -1,0 +1,278 @@
+{
+ "game": "e6fba750",
+ "window": "0_600",
+ "clip_t0": 0.0,
+ "plays": [
+  {
+   "t": 8.8,
+   "cls": "FG_MISS",
+   "a": "Tajzmere Divine McKnight"
+  },
+  {
+   "t": 12.7,
+   "cls": "4PT_MISS",
+   "a": "Dioscar Gregorio Gomez"
+  },
+  {
+   "t": 28.8,
+   "cls": "FG_MAKE",
+   "a": "Bryant Besu",
+   "b": "Bryant Besu"
+  },
+  {
+   "t": 44,
+   "cls": "FG_MISS",
+   "a": "Daniel Mark Baad"
+  },
+  {
+   "t": 46.5,
+   "cls": "REBOUND",
+   "a": "Fui Martinez"
+  },
+  {
+   "t": 60.9,
+   "cls": "3PT_MISS",
+   "a": "Fui Martinez"
+  },
+  {
+   "t": 63.5,
+   "cls": "REBOUND",
+   "a": "Dioscar Gregorio Gomez"
+  },
+  {
+   "t": 68.2,
+   "cls": "BLOCK",
+   "a": "Bryant Besu"
+  },
+  {
+   "t": 70.8,
+   "cls": "REBOUND",
+   "a": "Tajzmere Divine McKnight"
+  },
+  {
+   "t": 77.6,
+   "cls": "FG_MAKE",
+   "a": "Dioscar Gregorio Gomez"
+  },
+  {
+   "t": 91.6,
+   "cls": "FG_MAKE",
+   "a": "Brayan Delgado"
+  },
+  {
+   "t": 101.9,
+   "cls": "4PT_MAKE",
+   "a": "Fui Martinez",
+   "b": "Brayan Delgado"
+  },
+  {
+   "t": 122.7,
+   "cls": "3PT_MISS",
+   "a": "Tajzmere Divine McKnight"
+  },
+  {
+   "t": 124.8,
+   "cls": "REBOUND",
+   "a": "Bryant Besu"
+  },
+  {
+   "t": 137.6,
+   "cls": "FG_MAKE",
+   "a": "Bryant Besu",
+   "b": "Brayan Delgado"
+  },
+  {
+   "t": 149.5,
+   "cls": "4PT_MISS",
+   "a": "Jeff Vargas"
+  },
+  {
+   "t": 158.2,
+   "cls": "4PT_MISS",
+   "a": "Fui Martinez"
+  },
+  {
+   "t": 160.8,
+   "cls": "REBOUND",
+   "a": "Tajzmere Divine McKnight"
+  },
+  {
+   "t": 166.1,
+   "cls": "FG_MAKE",
+   "a": "Jeff Vargas"
+  },
+  {
+   "t": 180.2,
+   "cls": "4PT_MAKE",
+   "a": "Brayan Delgado"
+  },
+  {
+   "t": 192,
+   "cls": "FG_MAKE",
+   "a": "Jeff Vargas"
+  },
+  {
+   "t": 203.2,
+   "cls": "3PT_MAKE",
+   "a": "Fui Martinez"
+  },
+  {
+   "t": 215.1,
+   "cls": "FG_MAKE",
+   "a": "Tajzmere Divine McKnight"
+  },
+  {
+   "t": 236.5,
+   "cls": "FG_MAKE",
+   "a": "Brayan Delgado"
+  },
+  {
+   "t": 248,
+   "cls": "4PT_MAKE",
+   "a": "Jeff Vargas"
+  },
+  {
+   "t": 317.9,
+   "cls": "4PT_MAKE",
+   "a": "Brayan Delgado"
+  },
+  {
+   "t": 330.5,
+   "cls": "FOUL",
+   "a": "Jeff Vargas"
+  },
+  {
+   "t": 352.3,
+   "cls": "FREE_THROW_MAKE",
+   "a": "Jeff Vargas"
+  },
+  {
+   "t": 365.1,
+   "cls": "FREE_THROW_MAKE",
+   "a": "Jeff Vargas"
+  },
+  {
+   "t": 381.9,
+   "cls": "FG_MAKE",
+   "a": "Brayan Delgado"
+  },
+  {
+   "t": 389.3,
+   "cls": "3PT_MAKE",
+   "a": "Jeff Vargas"
+  },
+  {
+   "t": 402.5,
+   "cls": "3PT_MAKE",
+   "a": "Bryant Besu",
+   "b": "Bryant Besu"
+  },
+  {
+   "t": 414.2,
+   "cls": "4PT_MISS",
+   "a": "Dioscar Gregorio Gomez"
+  },
+  {
+   "t": 416.1,
+   "cls": "REBOUND",
+   "a": "Brayan Delgado"
+  },
+  {
+   "t": 424.3,
+   "cls": "FG_MAKE",
+   "a": "Fui Martinez",
+   "b": "Bryant Besu"
+  },
+  {
+   "t": 436.8,
+   "cls": "4PT_MISS",
+   "a": "Jeff Vargas"
+  },
+  {
+   "t": 439.8,
+   "cls": "REBOUND",
+   "a": "Brayan Delgado"
+  },
+  {
+   "t": 444.6,
+   "cls": "4PT_MISS",
+   "a": "Fui Martinez"
+  },
+  {
+   "t": 446.7,
+   "cls": "REBOUND",
+   "a": "Dioscar Gregorio Gomez"
+  },
+  {
+   "t": 450.7,
+   "cls": "FOUL",
+   "a": "Jeff Vargas"
+  },
+  {
+   "t": 469,
+   "cls": "FREE_THROW_MISS",
+   "a": "Jeff Vargas"
+  },
+  {
+   "t": 487.1,
+   "cls": "FREE_THROW_MAKE",
+   "a": "Jeff Vargas"
+  },
+  {
+   "t": 502,
+   "cls": "3PT_MISS",
+   "a": "Bryant Besu"
+  },
+  {
+   "t": 504.2,
+   "cls": "REBOUND",
+   "a": "Tajzmere Divine McKnight"
+  },
+  {
+   "t": 509.2,
+   "cls": "FG_MAKE",
+   "a": "Tajzmere Divine McKnight"
+  },
+  {
+   "t": 522.3,
+   "cls": "4PT_MISS",
+   "a": "Brayan Delgado"
+  },
+  {
+   "t": 525.3,
+   "cls": "REBOUND",
+   "a": "Jeff Vargas"
+  },
+  {
+   "t": 527.8,
+   "cls": "FG_MAKE",
+   "a": "Dioscar Gregorio Gomez",
+   "b": "Jeff Vargas"
+  },
+  {
+   "t": 542,
+   "cls": "FOUL",
+   "a": "Jeff Vargas"
+  },
+  {
+   "t": 551.9,
+   "cls": "FG_MISS",
+   "a": "Fui Martinez"
+  },
+  {
+   "t": 554.1,
+   "cls": "REBOUND",
+   "a": "Jeff Vargas"
+  },
+  {
+   "t": 565.5,
+   "cls": "FG_MISS",
+   "a": "Dioscar Gregorio Gomez"
+  },
+  {
+   "t": 587,
+   "cls": "FREE_THROW_MAKE",
+   "a": "Andre Del Castillo"
+  }
+ ]
+}
