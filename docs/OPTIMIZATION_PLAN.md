@@ -133,6 +133,11 @@ A. **Re-baseline on yolo26s everywhere** — DONE for e6+c2a (2026-07-11):
 B. **Kit-aware identity on e6** (#22 has a same-number opponent; c2a showed
    kit-awareness is worth up to +26pts on affected players — likely ~+1pt mean).
 C. **#43 far-court FR diagnosis** (worst cell in the failure heatmap).
+   **#6 diagnosis (2026-07-11)**: the −8 outlier is WRONG-PICK dominated
+   (864 wrong vs 139 no-pick) and concentrated in FR (0.633) and NR (0.747);
+   FL/NL are healthy (~0.86). Same cells bleed for #43 (FR 0.527) and #22.
+   ⇒ the fix is identity discrimination in crowded right-side cells (denser
+   anchors there, KPR gating, kit-awareness), NOT detection recall.
 D. **KPR flywheel cycle 2**: retrain on e6+c2a+f66 auto-labels from the 26s
    pipeline (cycle 1 gave +0.9 mean at $2.50).
 E. **More OCR anchors at distance**: bigger jersey numbers with the venue
