@@ -31,6 +31,8 @@ FG_DIR = "runs/fullgame_{gid8}/runs"
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--gid8", default="e6fba750")
+    ap.add_argument("--chunks", default=",".join(CHUNKS),
+                    help="comma list of chunk tags to process")
     ap.add_argument("--fetch", action="store_true")
     ap.add_argument("--i-rotated-creds", action="store_true")
     a = ap.parse_args()
@@ -64,7 +66,7 @@ def main() -> int:
     tmp = Path(tempfile.mkdtemp()) / "anch_bundle.tar.gz"
     print("bundling dets+pose caches + jersey stack + scripts + src...")
     with tarfile.open(tmp, "w:gz") as t:
-        for ch in CHUNKS:
+        for ch in a.chunks.split(","):
             for ang in ANGLES:
                 t.add(fg / "dets_cache" / f"{a.gid8}_{ang}_{ch}_small_1280_t0.25.dets.npz",
                       arcname=f"runs/dets_cache/{a.gid8}_{ang}_{ch}_small_1280_t0.25.dets.npz")
@@ -83,7 +85,7 @@ def main() -> int:
 
     dls = "\n".join(f'curl -s -L "{u}" -o "videos/{a.gid8}_{ang}.mp4" & DLPIDS="$DLPIDS $!"'
                     for ang, u in video_urls.items())
-    chunk_lines = " ".join(CHUNKS)
+    chunk_lines = " ".join(a.chunks.split(","))
     ud = f"""#!/bin/bash
 exec > /var/log/anch.log 2>&1
 export HOME=/root PYTHONUNBUFFERED=1 YOLO_CONFIG_DIR=/tmp/Ultralytics
