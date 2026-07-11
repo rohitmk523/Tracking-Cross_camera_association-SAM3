@@ -89,6 +89,15 @@ stride-2.
    2s / 4s; adopt the cheapest setting that holds strict AND fused within 0.5pt of
    dense. If it doesn't hold, keep dense-batched for the finalization pass and
    triggered mode for the live path only — both profiles stay in the codebase.
+   **SWEEP RESULT (2026-07-11): triggered FAILS the offline gate** — 78% crops,
+   −2.9 strict at best (H=30: 0.802/0.879 vs dense-s1 0.831/0.892); heartbeat
+   barely changes selection (unclaimed + contact triggers dominate in basketball).
+   **ADOPTED: dense stride-1 is the offline operating point everywhere**
+   (188s/game-min post-batching — accuracy is the preference and density pays:
+   c2a 0.831/0.892 is the NEW champion, beating the RF-DETR lane). Triggered
+   extractor stays in-tree as the LIVE profile, to be tuned on the AGX where
+   dense is not affordable. Both GT windows now run dense-s1 on yolo26s:
+   e6 81.5/85.5 · c2a 0.831/0.892.
 5. **Detection stride-2 with tracker bridging.** Detect every 2nd frame; ByteTrack
    carries boxes between. Halves detect time (and helps every downstream stage that
    iterates detections). Gate: same GT scoring; far-court players are the risk
