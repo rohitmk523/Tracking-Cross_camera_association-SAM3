@@ -118,7 +118,38 @@ e6fba750.mp4 · sam3player_n{11,22,43,6}_final88_e6fba750.mp4 (SAM3 era) ·
 pipeline_failure_heatmap.jpg (green center, red edges → bigger-jersey-numbers rec) ·
 ledger/master_scorecard.jsonl (every scored experiment).
 
-## 8. Backlog (ordered)
+## 8. THE AIM (user-stated, 2026-07-11): as REAL-TIME as possible, as ACCURATE as possible
+
+**User's detection thesis (adopted):** the failure mode is far-angle small-player
+detection; since every player is covered by 2-4 cameras, high PRECISION with
+good-enough recall at usable player sizes is the right trade — a far-cam miss is
+survivable (redundancy covers it), a false box is not (it steals claims/ties/reacq).
+Consequence for judging: the strict all-angles metric over-punishes far-cam misses
+relative to the product; the detector winner is judged on BOTH strict AND fused
+(≥1-cam) coverage, plus speed.
+
+**Detector decision procedure (when yolo26s lands, ~pending):**
+1. Per-class val (ball!) for yolo26s.
+2. Pipeline gate on the SAME e6 window: report strict AND fused per detector.
+3. Race lane: add yolo26s (and yolo11m) to the A10G race
+   (current: RF-DETR-FP16 24.4fps/$3.97 · yolo11s 67fps/$1.45).
+4. Pick ONE winner across accuracy(strict+fused)/speed/license → it becomes the
+   pipeline's detector everywhere. Record the final 4-way table in STATUS Part 6.
+
+**Results so far:** RF-DETR 83.2% strict (champion) · yolo11s 81.8%, 2.7× faster ·
+yolo11m 80.0% (mAP winner, pipeline loser — KEY LESSON: benchmark mAP does not
+order pipeline outcomes; box consistency/mAP50-95 correlates better).
+
+**Post-winner agenda (in order):**
+1. Adopt winner into all prep jobs + dets caches; re-baseline e6/c2a numbers.
+2. REAL-TIME push: detect every 2nd-3rd frame (tracker bridges), batching,
+   TensorRT export; target full-game prep < 30 min, then Jetson AGX port.
+3. ACCURACY push: kit-aware identity on e6 (#22 same-number opponent — free win);
+   #43 far-court cell diagnosis; flywheel cycle 2 (e6+f66 auto-labels into KPR);
+   bigger jersey numbers with the venue (highest-leverage physical change).
+4. Ball workstream (detection labels exist; tracking/possession scoped not started).
+
+## 8b. Backlog (ordered)
 
 1. YOLO Level-1/2/3 when weights land (watchers will fire).
 2. Update STATUS with f66 fully-blind result + YOLO outcome table.
