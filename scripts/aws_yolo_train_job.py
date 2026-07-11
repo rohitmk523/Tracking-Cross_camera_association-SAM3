@@ -134,7 +134,7 @@ def fetch(a) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", required=True, choices=["yolo11s", "yolo11m"])
+    ap.add_argument("--model", required=True, choices=["yolo11s", "yolo11m", "yolo26s", "yolo26m"])
     ap.add_argument("--batch", type=int, default=8)
     ap.add_argument("--epochs", type=int, default=100)
     ap.add_argument("--fetch", action="store_true")
