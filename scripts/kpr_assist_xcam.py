@@ -72,6 +72,21 @@ def main() -> int:
         p = np.load(REPO / f"runs/pose_cache/{GAME}_{ang}_{TAG}.pose.npz")
         pose_by[ang] = {(int(f), int(d)): (k, s) for f, d, k, s in
                         zip(p["frame_idx"], p["det_idx"], p["kpts"], p["kscores"])}
+    # GT det-index references were made against the ORIGINAL detector's lists; when
+    # the pipeline runs a different detector (Level-2 gate), GT_DETS_DIR points at
+    # the original caches so grading stays valid.
+    _gtd = _os.environ.get("GT_DETS_DIR")
+    gt_dets = None
+    if _gtd:
+        gt_dets = {}
+        for ang in ANGLES:
+            z = np.load(REPO / _gtd / f"{GAME}_{ang}_{TAG}_small_1280_t0.25.dets.npz")
+            m = defaultdict(list)
+            for b, c, f in zip(z["boxes"], z["classes"], z["frame_idx"]):
+                if int(c) in (0, 1):
+                    m[int(f)].append([float(v) for v in b])
+            gt_dets[ang] = m
+
     anchors = defaultdict(list)
     for ev in json.loads((REPO / f"runs/anchors/{KEY}.jersey_anchors.json").read_text())["anchors"]:
         anchors[(ev["cam"], ev["frame"])].append((ev["box"], int(ev["number"]), ev.get("conf", 1.0)))
@@ -523,7 +538,7 @@ def main() -> int:
                 if ang not in sel[f]:
                     continue
                 cf = f + OFFS[ang]
-                gb = [b for _, b in dets[ang].get(cf, [])]
+                gb = gt_dets[ang].get(cf, []) if gt_dets else [b for _, b in dets[ang].get(cf, [])]
                 if sel[f][ang] >= len(gb):
                     continue
                 n_vis += 1
@@ -542,7 +557,7 @@ def main() -> int:
                     if ang not in sel[f]:
                         continue
                     cf = f + OFFS[ang]
-                    gb = [b for _, b in dets[ang].get(cf, [])]
+                    gb = gt_dets[ang].get(cf, []) if gt_dets else [b for _, b in dets[ang].get(cf, [])]
                     if sel[f][ang] >= len(gb):
                         continue
                     nv += 1
