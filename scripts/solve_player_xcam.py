@@ -82,6 +82,21 @@ def main() -> int:
             full = z["boxes"]
             for f, d, k, ks in zip(p["frame_idx"], p["det_idx"], p["kpts"], p["kscores"]):
                 pose_by[ang][int(f)].append(([float(v) for v in full[int(d)]], k, ks))
+    # GT det-index references were made against the ORIGINAL detector's lists; when a
+    # different detector runs the pipeline, GT_DETS_DIR points grading at the originals.
+    import os as _os
+    _gtd = _os.environ.get("GT_DETS_DIR")
+    gt_dets = None
+    if _gtd:
+        gt_dets = {}
+        for ang in ANGLES:
+            z = np.load(REPO / _gtd / f"{a.game}_{ang}_{a.tag}_small_1280_t0.25.dets.npz")
+            m = defaultdict(list)
+            for b, c, f in zip(z["boxes"], z["classes"], z["frame_idx"]):
+                if int(c) in (0, 1):
+                    m[int(f)].append([float(v) for v in b])
+            gt_dets[ang] = m
+
     anchors = defaultdict(list)   # (cam, ref_frame) -> [(box, number, conf, kit)]
     for ev in json.loads((REPO / f"runs/anchors/{key}.jersey_anchors.json").read_text())["anchors"]:
         anchors[(ev["cam"], ev["frame"])].append(
@@ -262,7 +277,7 @@ def main() -> int:
                 if ang not in sel[f]:
                     continue
                 cf = f + offs[ang]
-                gb = dets[ang].get(cf, [])
+                gb = (gt_dets or dets)[ang].get(cf, [])
                 if sel[f][ang] >= len(gb):
                     continue
                 n_vis += 1
@@ -280,7 +295,7 @@ def main() -> int:
             hit = False
             for ang in s:
                 cf = f + offs[ang]
-                gb = dets[ang].get(cf, [])
+                gb = (gt_dets or dets)[ang].get(cf, [])
                 if s[ang] < len(gb):
                     gpos.append(court(ang, gb[s[ang]], cf)); gw.append(ZONE[ang])
                 cb = corrected.get((ang, f))
@@ -304,6 +319,7 @@ def main() -> int:
                 (dd / f"{key}__{safe}__{ang}.json").write_text(
                     json.dumps({"player": pl, "cam": ang, "frames": frames_j}))
         report[pl] = {"fused_coverage": round(fused_hit / max(1, fused_n), 3),
+                      "strict_all_angles": round(sum(percam.values()) / len(percam), 3) if percam else None,
                       "per_camera_fidelity": percam,
                       "court_err_cm_median": round(float(np.median(court_err)), 1) if court_err else None,
                       "anchor_frames": len(anchor_pos), "truth_frames": len(truth),

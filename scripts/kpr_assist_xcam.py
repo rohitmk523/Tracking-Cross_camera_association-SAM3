@@ -562,7 +562,7 @@ def main() -> int:
                     continue
                 vis_any = True
                 cb = chosen["kpr"].get((ang, f))
-                if cb and iou(gb[sel[f][ang]], cb) >= IOU_HIT:
+                if cb is not None and iou(gb[sel[f][ang]], cb) >= IOU_HIT:
                     hit_any = True
             if vis_any:
                 fused_n += 1
@@ -615,9 +615,12 @@ def main() -> int:
              for m in ("base", "kpr", "kprseg")}
     print(f"\nMEAN strict all-angles: base {means['base']:.1%} -> frame-KPR {means['kpr']:.1%} "
           f"-> SEGMENT-KPR {means['kprseg']:.1%}   [SAM3+xcam was 88%]")
+    fused_mean = float(np.mean([r["fused"] for r in report.values()]))
+    print(f"MEAN FUSED (>=1 cam, kpr mode): {fused_mean:.1%}")
     (REPO / f"runs/tracking/ledger/kprxcam_{KEY}.json").write_text(json.dumps(
         {"window": KEY, "method": "hybrid xcam + KPR tie-break (no SAM3)",
-         "players": report, "mean": {m: round(float(v), 3) for m, v in means.items()}}, indent=1))
+         "players": report, "mean": {m: round(float(v), 3) for m, v in means.items()},
+         "mean_fused": round(fused_mean, 3)}, indent=1))
     return 0
 
 

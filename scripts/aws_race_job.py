@@ -20,8 +20,9 @@ import aws_sam3_job as J   # noqa: E402
 ANGLES = ("FL", "FR", "NL", "NR")
 
 
-def userdata(bundle_url, results_url, log_url, yolo2) -> str:
+def userdata(bundle_url, results_url, log_url, yolo2, yolo3) -> str:
     y2 = " --yolo2 weights/yolo11m_best.pt" if yolo2 else ""
+    y2 += " --yolo3 weights/yolo26s_best.pt" if yolo3 else ""
     return f"""#!/bin/bash
 exec > /var/log/race.log 2>&1
 export HOME=/root PYTHONUNBUFFERED=1 YOLO_CONFIG_DIR=/tmp/Ultralytics
@@ -51,6 +52,7 @@ sleep 5; shutdown -h now
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--yolo2", default=None, help="optional yolo11m best.pt path")
+    ap.add_argument("--yolo3", default=None, help="optional yolo26s best.pt path")
     ap.add_argument("--fetch", action="store_true")
     ap.add_argument("--i-rotated-creds", action="store_true")
     a = ap.parse_args()
@@ -76,6 +78,8 @@ def main() -> int:
         t.add(yolo_best, arcname="weights/yolo11s_best.pt")
         if a.yolo2:
             t.add(a.yolo2, arcname="weights/yolo11m_best.pt")
+        if a.yolo3:
+            t.add(a.yolo3, arcname="weights/yolo26s_best.pt")
         def flt(ti):
             return None if "__pycache__" in ti.name else ti
         t.add(REPO / "src", arcname="src", filter=flt)
@@ -88,7 +92,7 @@ def main() -> int:
                                          Params={"Bucket": bucket, "Key": key_}, ExpiresIn=exp)
 
     ud = userdata(presign("get", key, 28800), presign("put", J.results_key("race"), 86400),
-                  presign("put", J.log_key("race"), 86400), a.yolo2)
+                  presign("put", J.log_key("race"), 86400), a.yolo2, a.yolo3)
     ec2 = boto3.client("ec2", region_name=region)
     r = ec2.run_instances(
         ImageId=aws.get("ami"), InstanceType=aws.get("instance_type", "g5.2xlarge"),

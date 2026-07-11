@@ -67,13 +67,20 @@ def main() -> int:
     ap.add_argument("--rfdetr", required=True)
     ap.add_argument("--yolo", required=True)
     ap.add_argument("--yolo2", default=None)
+    ap.add_argument("--yolo3", default=None)
     a = ap.parse_args()
+
+    def yname(path):
+        stem = Path(path).stem            # e.g. yolo26s_best
+        return stem.replace("_best", "") + "_fp16"
 
     results = {}
     lanes = [("rfdetr_s_fp16", lambda: lane_rfdetr(a.rfdetr, a.game, a.tag)),
-             ("yolo11s_fp16", lambda: lane_yolo(a.yolo, a.game, a.tag))]
+             (yname(a.yolo), lambda: lane_yolo(a.yolo, a.game, a.tag))]
     if a.yolo2:
-        lanes.append(("yolo11m_fp16", lambda: lane_yolo(a.yolo2, a.game, a.tag)))
+        lanes.append((yname(a.yolo2), lambda: lane_yolo(a.yolo2, a.game, a.tag)))
+    if a.yolo3:
+        lanes.append((yname(a.yolo3), lambda: lane_yolo(a.yolo3, a.game, a.tag)))
     for name, fn in lanes:
         print(f"=== lane {name} ===", flush=True)
         fps = fn()
