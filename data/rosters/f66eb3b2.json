@@ -1,0 +1,91 @@
+{
+ "team1_color": "White",
+ "team2_color": "Black",
+ "players": [
+  {
+   "num": 1,
+   "name": "Marlon Fernandez",
+   "team": 1
+  },
+  {
+   "num": 2,
+   "name": "Ovidio Garcia",
+   "team": 1
+  },
+  {
+   "num": 3,
+   "name": "Kevin Villarreal",
+   "team": 1
+  },
+  {
+   "num": 4,
+   "name": "Irving Zamora",
+   "team": 1
+  },
+  {
+   "num": 5,
+   "name": "Bryan Rivera",
+   "team": 1
+  },
+  {
+   "num": 6,
+   "name": "Gerardo Cruz",
+   "team": 1
+  },
+  {
+   "num": 7,
+   "name": "Kenneth Hernandez",
+   "team": 1
+  },
+  {
+   "num": 8,
+   "name": "Lionel Diego",
+   "team": 1
+  },
+  {
+   "num": 9,
+   "name": "Joaldy Cruz",
+   "team": 1
+  },
+  {
+   "num": 2,
+   "name": "Carlos Castillo",
+   "team": 2
+  },
+  {
+   "num": 3,
+   "name": "Mario Cabrejos",
+   "team": 2
+  },
+  {
+   "num": 7,
+   "name": "Adolfo Diaz",
+   "team": 2
+  },
+  {
+   "num": 8,
+   "name": "Anthony Lanza",
+   "team": 2
+  },
+  {
+   "num": 11,
+   "name": "Scott Yogodzinski",
+   "team": 2
+  },
+  {
+   "num": 12,
+   "name": "Chris Garrido",
+   "team": 2
+  },
+  {
+   "num": 24,
+   "name": "Chris Ribero",
+   "team": 2
+  },
+  {
+   "num": 32,
+   "name": "Unknown player",
+   "team": 2
+  }
+ ]
+}

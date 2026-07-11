@@ -1,0 +1,86 @@
+{
+ "team1_color": "Black",
+ "team2_color": "White",
+ "players": [
+  {
+   "num": 1,
+   "name": "Richard Li",
+   "team": 1
+  },
+  {
+   "num": 2,
+   "name": "Trent Wasser",
+   "team": 1
+  },
+  {
+   "num": 3,
+   "name": "Jeremy Bull",
+   "team": 1
+  },
+  {
+   "num": 4,
+   "name": "Jacob Finkel",
+   "team": 1
+  },
+  {
+   "num": 8,
+   "name": "Miles Torres-Grand",
+   "team": 1
+  },
+  {
+   "num": 11,
+   "name": "Tyler Zuluaga",
+   "team": 1
+  },
+  {
+   "num": 66,
+   "name": "Nuno Grullon",
+   "team": 1
+  },
+  {
+   "num": 1,
+   "name": "Marlon Fernandez",
+   "team": 2
+  },
+  {
+   "num": 2,
+   "name": "Ovidio Garcia",
+   "team": 2
+  },
+  {
+   "num": 3,
+   "name": "Kevin Villarreal",
+   "team": 2
+  },
+  {
+   "num": 4,
+   "name": "Irving Zamora",
+   "team": 2
+  },
+  {
+   "num": 5,
+   "name": "Bryan Rivera",
+   "team": 2
+  },
+  {
+   "num": 6,
+   "name": "Gerardo Cruz",
+   "team": 2
+  },
+  {
+   "num": 7,
+   "name": "Kenneth Hernandez",
+   "team": 2
+  },
+  {
+   "num": 8,
+   "name": "Lionel Diego",
+   "team": 2
+  },
+  {
+   "num": 9,
+   "name": "Joaldy Cruz",
+   "team": 2
+  }
+ ]
+}

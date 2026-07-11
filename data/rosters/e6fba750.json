@@ -1,0 +1,76 @@
+{
+ "team1_color": "Blue",
+ "team2_color": "Green",
+ "players": [
+  {
+   "num": 0,
+   "name": "Jordan Davis",
+   "team": 1
+  },
+  {
+   "num": 1,
+   "name": "Truth Veritas",
+   "team": 1
+  },
+  {
+   "num": 5,
+   "name": "Stanley Chamblain",
+   "team": 1
+  },
+  {
+   "num": 6,
+   "name": "Brayan Delgado",
+   "team": 1
+  },
+  {
+   "num": 43,
+   "name": "Fui Martinez",
+   "team": 1
+  },
+  {
+   "num": 90,
+   "name": "Bryant Besu",
+   "team": 1
+  },
+  {
+   "num": 3,
+   "name": "Aaron Anthony Vidal",
+   "team": 2
+  },
+  {
+   "num": 6,
+   "name": "Michael Fernandez",
+   "team": 2
+  },
+  {
+   "num": 8,
+   "name": "Christian Amado",
+   "team": 2
+  },
+  {
+   "num": 10,
+   "name": "Jeff Vargas",
+   "team": 2
+  },
+  {
+   "num": 11,
+   "name": "Dioscar Gregorio Gomez",
+   "team": 2
+  },
+  {
+   "num": 22,
+   "name": "Tajzmere Divine McKnight",
+   "team": 2
+  },
+  {
+   "num": 25,
+   "name": "Daniel Mark Baad",
+   "team": 2
+  },
+  {
+   "num": 55,
+   "name": "Andre Del Castillo",
+   "team": 2
+  }
+ ]
+}
