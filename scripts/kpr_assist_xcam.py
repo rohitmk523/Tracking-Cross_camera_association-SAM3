@@ -547,8 +547,31 @@ def main() -> int:
                     n_none += 1
                 elif iou(gb[sel[f][ang]], cb) < IOU_HIT:
                     n_wrong += 1
+        # FUSED coverage (>=1 visible camera correct) — the product metric
+        fused_hit = fused_n = 0
+        for f in frames:
+            vis_any = hit_any = False
+            for ang in ANGLES:
+                if ang not in sel[f]:
+                    continue
+                cf = f + OFFS[ang]
+                src = gt_dets[ang] if gt_dets else None
+                gb = (src.get(cf, []) if src is not None
+                      else [b for _, b in dets[ang].get(cf, [])])
+                if sel[f][ang] >= len(gb):
+                    continue
+                vis_any = True
+                cb = chosen["kpr"].get((ang, f))
+                if cb and iou(gb[sel[f][ang]], cb) >= IOU_HIT:
+                    hit_any = True
+            if vis_any:
+                fused_n += 1
+                fused_hit += int(hit_any)
+        fused = fused_hit / max(1, fused_n)
+        print(f"{pl}: FUSED coverage {fused:.0%} ({fused_hit}/{fused_n})")
         row = {"ties": n_ties, "flipped": n_flipped, "segments": n_segs,
-               "err_none": n_none, "err_wrong": n_wrong, "n_vis": n_vis}
+               "err_none": n_none, "err_wrong": n_wrong, "n_vis": n_vis,
+               "fused": round(fused, 3)}
         for m in ("base", "kpr", "kprseg"):
             pc = {}
             for ang in ANGLES:
