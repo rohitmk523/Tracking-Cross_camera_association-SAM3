@@ -55,6 +55,34 @@ def main() -> int:
     color = {pl: COLORS[i % len(COLORS)] for i, pl in enumerate(players)}
     print(f"rendering {len(players)} players: {players}")
 
+    # roster names (data/rosters/{game}.json, from Supabase games.roster_team1/2):
+    # label "#3W" -> "3 K.Villarreal". Kit letter B/W maps to the DARKER/BRIGHTER
+    # team colour; when a number is unique on the roster the kit letter is ignored.
+    label = {pl: pl for pl in players}
+    rp = REPO / f"data/rosters/{a.game}.json"
+    if rp.exists():
+        rj = json.loads(rp.read_text())
+        DARK = ("black", "blue", "navy", "green", "red", "purple", "maroon")
+        t1_dark = any(w in str(rj.get("team1_color", "")).lower() for w in DARK)
+        kit_team = {"B": 1 if t1_dark else 2, "W": 2 if t1_dark else 1}
+        by_num = {}
+        for pr in rj["players"]:
+            by_num.setdefault(pr["num"], []).append(pr)
+        for pl in players:
+            num = int("".join(c for c in pl if c.isdigit()))
+            kit = pl[-1] if pl[-1] in ("B", "W") else None
+            cands = by_num.get(num, [])
+            pick = None
+            if len(cands) == 1:
+                pick = cands[0]
+            elif len(cands) > 1 and kit:
+                pick = next((c for c in cands if c["team"] == kit_team[kit]), None)
+            if pick:
+                parts_n = pick["name"].split()
+                short = f"{parts_n[0][0]}.{parts_n[-1]}" if len(parts_n) > 1 else pick["name"]
+                label[pl] = f"{num} {short}"
+    print("labels:", label)
+
     caps = {ang: cv2.VideoCapture(str(REPO / f"data/clips/{a.game}_{ang}_{a.tag}.mp4"))
             for ang in ANGLES}
     n = int(min(c.get(cv2.CAP_PROP_FRAME_COUNT) for c in caps.values()))
@@ -95,7 +123,7 @@ def main() -> int:
                     continue
                 x1, y1, x2, y2 = (int(v) for v in box)
                 cv2.rectangle(imgs[ang], (x1, y1), (x2, y2), color[pl], 6)
-                cv2.putText(imgs[ang], pl, (x1, max(36, y1 - 10)),
+                cv2.putText(imgs[ang], label[pl], (x1, max(36, y1 - 10)),
                             cv2.FONT_HERSHEY_SIMPLEX, 1.6, color[pl], 4, cv2.LINE_AA)
                 pts.append(court_of(ang, box)); ws.append(ZONE[ang])
             if pts:

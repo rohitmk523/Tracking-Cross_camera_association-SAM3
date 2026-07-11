@@ -34,6 +34,18 @@ ZONE = {"FL": 0.6, "FR": 0.6, "NL": 1.0, "NR": 1.0}
 GAME, TAG = "e6fba750", "44_60"
 KEY = f"{GAME}_{TAG}"
 PLAYERS = {"#11": 11, "#22": 22, "#43": 43, "#6": 6}
+# kit-aware override, e.g. PLAYERS_JSON='{"#11":11,"#22":22,"#43":43,"#6B":6}' —
+# a trailing B/W on the name restricts that player's anchors to that kit shade
+import json as _json
+import os as _os
+if _os.environ.get("PLAYERS_JSON"):
+    PLAYERS = _json.loads(_os.environ["PLAYERS_JSON"])
+KIT_OF = {pl: (pl[-1] if pl[-1] in ("B", "W") else None) for pl in PLAYERS}
+
+
+def kit_ok(pl, akit):
+    k = KIT_OF[pl]
+    return k is None or akit in (None, k)
 import os as _os
 SAM3_DIR = _os.environ.get("SAM3_DIR", "runs/hybrid_e6")                 # SAM3-free track streams
 GATE_CM = float(_os.environ.get("GATE_CM", 180.0))
@@ -89,7 +101,7 @@ def main() -> int:
 
     anchors = defaultdict(list)
     for ev in json.loads((REPO / f"runs/anchors/{KEY}.jersey_anchors.json").read_text())["anchors"]:
-        anchors[(ev["cam"], ev["frame"])].append((ev["box"], int(ev["number"]), ev.get("conf", 1.0)))
+        anchors[(ev["cam"], ev["frame"])].append((ev["box"], int(ev["number"]), ev.get("conf", 1.0), ev.get("kit")))
     gt = json.loads((REPO / f"data/gt_players/{KEY}.json").read_text())
 
     from uball_cc.fusion.homography import load_calib, project_pixels
@@ -110,7 +122,8 @@ def main() -> int:
                 sam[ang] = {int(f): r for f, r in json.loads(p.read_text())["frames"].items()
                             if r.get("present") and r.get("box")}
         sam_by_pl[pl] = sam
-        sel = {int(f): s for f, s in gt[pl]["frames"].items() if s and str(f) in gt[pl].get("approved", {})}
+        gpl = gt.get(pl) or gt[pl[:-1] if pl[-1] in ("B", "W") else pl]
+        sel = {int(f): s for f, s in gpl["frames"].items() if s and str(f) in gpl.get("approved", {})}
         frames = sorted(sel)
         frames_by_pl[pl] = (frames, sel)
         anchor_pos = {}
@@ -120,8 +133,8 @@ def main() -> int:
                 sr = sam.get(ang, {}).get(f + OFFS[ang])
                 if not sr:
                     continue
-                for abox, anum, aconf in anchors.get((ang, f), []):
-                    if anum == num and iou(sr["box"], abox) >= 0.3:
+                for abox, anum, aconf, akit in anchors.get((ang, f), []):
+                    if anum == num and iou(sr["box"], abox) >= 0.3 and kit_ok(pl, akit):
                         pts.append(court(ang, sr["box"])); ws.append(ZONE[ang] * aconf)
                         break
             if pts:
@@ -139,8 +152,9 @@ def main() -> int:
     # galleries: jersey-CONFIRMED detections (production identity, no GT)
     gal_specs = {pl: [] for pl in PLAYERS}          # (ang, cf, di, box)
     for (ang, f), evs in anchors.items():
-        for abox, anum, aconf in evs:
-            pl = next((p for p, n in PLAYERS.items() if n == anum), None)
+        for abox, anum, aconf, akit in evs:
+            pl = next((p for p, n in PLAYERS.items()
+                       if n == anum and kit_ok(p, akit)), None)
             if pl is None or aconf < 0.95:
                 continue
             cf = f + OFFS[ang]
@@ -409,7 +423,8 @@ def main() -> int:
                 cf = f + OFFS[ang]
                 sr = sam_by_pl[pl].get(ang, {}).get(cf)
                 if sr and any(anum == PLAYERS[pl] and iou(sr["box"], abox) >= 0.3
-                              for abox, anum, _ in anchors.get((ang, f), [])):
+                              and kit_ok(pl, akit)
+                              for abox, anum, _, akit in anchors.get((ang, f), [])):
                     is_anchor_f = True
             for ang in ANGLES:
                 cf = f + OFFS[ang]
@@ -449,7 +464,8 @@ def main() -> int:
                 cf = f + OFFS[ang]
                 sr = sam.get(ang, {}).get(cf)
                 is_anchor = sr and any(anum == num and iou(sr["box"], abox) >= 0.3
-                                       for abox, anum, _ in anchors.get((ang, f), []))
+                                       and kit_ok(pl, akit)
+                                       for abox, anum, _, akit in anchors.get((ang, f), []))
                 if is_anchor:
                     for m in chosen:
                         chosen[m][(ang, f)] = sr["box"]
