@@ -142,6 +142,9 @@ via GT_DETS_DIR; kit-copy step required for dual streams — n3→n3B/n3W).
 | yolo11s | .766 | .844 | 1578s | 67.2 | 6857 |
 | yolo11m | .762 | .816 | 1560s | 60.3 | 6756 |
 
+**DECISION (user, 2026-07-11): yolo26s IS the production detector from now on.**
+Optimization roadmap: docs/OPTIMIZATION_PLAN.md (phases: waste removal -> triggered
+OCR/stride gates -> CoreML/TensorRT + 4th-class; accuracy track in parallel).
 **Verdict:** RF-DETR = accuracy reference (wins both metrics). yolo26s = edge/live
 candidate (best YOLO, fused −1.0pt, 2.6× det speed, DeepStream/TensorRT drop-in on
 the new AGX streaming box, MOST jersey reads). User to visually confirm
