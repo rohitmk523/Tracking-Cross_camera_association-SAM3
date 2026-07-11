@@ -26,7 +26,7 @@ DATASET = REPO / "data/detect_consolidated"
 DATASET_KEY = f"{J.PREFIX}/detect_consolidated.tar.gz"
 
 
-def userdata(dataset_url, results_url, log_url, model, batch) -> str:
+def userdata(dataset_url, results_url, log_url, model, batch, epochs) -> str:
     return f"""#!/bin/bash
 exec > /var/log/yolo.log 2>&1
 export HOME=/root PYTHONUNBUFFERED=1 YOLO_CONFIG_DIR=/tmp/Ultralytics
@@ -48,13 +48,13 @@ curl -s -L "{dataset_url}" -o d.tgz && tar xzf d.tgz && rm d.tgz
 sed -i "s|^path:.*|path: /work/detect_consolidated|" detect_consolidated/data.yaml
 # incremental best.pt uploader
 (while true; do sleep 600
-   B=$(ls runs/{model}-1280-ourdata-v1/weights/best.pt 2>/dev/null)
+   B=$(find runs -name best.pt 2>/dev/null | head -1)
    if [ -n "$B" ]; then tar czf results.tar.gz runs; curl -sS -o /dev/null -T results.tar.gz "{results_url}" || true; fi
 done) &
 $PYBIN - <<'PY'; RC=$?
 from ultralytics import YOLO
 m = YOLO("{model}.pt")
-m.train(data="/work/detect_consolidated/data.yaml", imgsz=1280, epochs=100, batch={batch},
+m.train(data="/work/detect_consolidated/data.yaml", imgsz=1280, epochs={epochs}, batch={batch},
         cos_lr=True, patience=25, cache="disk", mosaic=0.5, close_mosaic=15,
         copy_paste=0.0, project="runs", name="{model}-1280-ourdata-v1", exist_ok=True)
 best = YOLO("runs/{model}-1280-ourdata-v1/weights/best.pt")
@@ -98,7 +98,7 @@ def launch(a) -> None:
     tag = f"yolo_{a.model}"
     ud = userdata(presign("get", DATASET_KEY, 28800),
                   presign("put", J.results_key(tag), 172800),
-                  presign("put", J.log_key(tag), 172800), a.model, a.batch)
+                  presign("put", J.log_key(tag), 172800), a.model, a.batch, a.epochs)
     ec2 = boto3.client("ec2", region_name=region)
     r = ec2.run_instances(
         ImageId=aws.get("ami"), InstanceType=aws.get("instance_type", "g5.2xlarge"),
@@ -136,6 +136,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True, choices=["yolo11s", "yolo11m"])
     ap.add_argument("--batch", type=int, default=8)
+    ap.add_argument("--epochs", type=int, default=100)
     ap.add_argument("--fetch", action="store_true")
     ap.add_argument("--i-rotated-creds", action="store_true")
     a = ap.parse_args()
