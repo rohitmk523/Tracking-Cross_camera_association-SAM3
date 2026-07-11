@@ -178,14 +178,28 @@ def main() -> int:
         f_shot = int(round(t_clip * FPS))
         cls = play["cls"]
         is_shot = any(k in cls for k in ("MAKE", "MISS"))
-        window = range(max(0, f_shot - int(SHOT_LOOKBACK[1] * FPS)),
-                       max(1, f_shot - int(SHOT_LOOKBACK[0] * FPS)))
+        if cls in ("REBOUND", "STEAL"):
+            # possession lands AT/AFTER these events — look forward
+            window = range(f_shot, f_shot + int(2.5 * FPS))
+        else:
+            window = range(max(0, f_shot - int(SHOT_LOOKBACK[1] * FPS)),
+                           max(1, f_shot - int(SHOT_LOOKBACK[0] * FPS)))
         who = Counter(possess[f] for f in window if f in possess)
         pred_pl = who.most_common(1)[0][0] if who else None
         pred_name, pred_zone = None, None
         if pred_pl:
             pred_name = name_of(pred_pl)
-            f_rel = max((f for f in window if possess.get(f) == pred_pl), default=None)
+            recent = [f for f in window if possess.get(f) == pred_pl]
+            # release position: freshest possession within 1.5s of the timestamp
+            # (older frames misplace deep shooters -> 4PT under-zoning)
+            fresh = [f for f in recent if abs(f - f_shot) <= int(1.5 * FPS)]
+            f_rel = max(fresh) if fresh else (max(recent) if recent else None)
+            # zone from the shooter's position AT the logged timestamp when his
+            # track covers it (deep shooters hold the release spot; old possession
+            # frames under-range 4PT)
+            if is_shot and any((f_shot + offs[ang]) in tracks[pred_pl].get(ang, {})
+                               for ang in ANGLES):
+                f_rel = f_shot
             if f_rel is not None:
                 pts = [court(ang, tracks[pred_pl][ang][f_rel + offs[ang]])
                        for ang in ANGLES
