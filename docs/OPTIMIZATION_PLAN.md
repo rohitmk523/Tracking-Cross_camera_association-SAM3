@@ -102,10 +102,21 @@ stride-2.
    carries boxes between. Halves detect time (and helps every downstream stage that
    iterates detections). Gate: same GT scoring; far-court players are the risk
    (small, fast) — watch #43-e6 and #5B-c2a specifically.
-6. **Pose only where it's used.** Pose currently runs on ALL detections; its
-   consumers are sole07 projection (tracked players), kit torsos, and KPR prompts.
-   Restrict to boxes attached to live tracks + OCR-trigger crops. Expected −30-40%
-   pose time. Gate: cross-cam agreement (48cm baseline) must not regress.
+   **GATE RESULT (2026-07-11): FAILS** — 0.821/0.862 vs 0.831/0.892 (−1.0/−3.0),
+   and the simulation (offline interpolation from the full cache) is stride-2's
+   BEST case. Rejected offline; live-profile option only.
+6. **Pose only where it's used.** SKIPPED by reasoning (2026-07-11): the
+   correction may pick ANY detection near the truth position, and a picked box
+   without pose loses sole07 projection precisely in the wrong-pick recovery
+   cases we care about. Not worth 50s/game-min.
+
+**PHASE-2 OFFLINE CONCLUSION: every work-reduction failed its gate.** Full read
+density and full detection rate win on every measurement (5 datapoints). The
+offline pipeline keeps Phase-1's execution wins (~9.4 min/game-min laptop at
+HIGHER-than-ever accuracy: c2a 0.831/0.892, e6 81.5/85.5) and gets faster only
+via Phase-3 engine ports. The work-reduction toolset (triggered OCR, stride-2)
+is the LIVE profile for the AGX, where the latency budget forces it and the
+offline finalization pass recovers full accuracy afterwards.
 
 **Phase 2 exit estimate: ~180-280s per game-minute (A10G) ≈ 3-4.5× real-time;
 laptop ~4-7 min per game-minute.**
