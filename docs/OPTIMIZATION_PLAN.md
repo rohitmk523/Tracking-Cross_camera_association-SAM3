@@ -121,9 +121,15 @@ AGX live pass at stream rate with provisional IDs.**
 
 ## Accuracy track (runs in parallel — the other half of the mandate)
 
-A. **Re-baseline on yolo26s everywhere**: rebuild dets caches (e6, c2a, f66),
-   re-run the full stack incl. fine-tuned KPR on e6 GT → the new champion number
-   to beat (RF-DETR full-stack was 83.2%).
+A. **Re-baseline on yolo26s everywhere** — DONE for e6+c2a (2026-07-11):
+   e6 full stack (stride-1 anchors, ft-KPR) = **81.5 strict / 85.5 fused**
+   (RF-DETR 83.2 strict). #11 94(+2), #43 77(+3), #22 78(−4), **#6 77(−8 —
+   THE outlier: reads +14% yet worse; diagnose detection/claims in #6's zone)**.
+   26s anchors are DENSER than RF-DETR's (9,461 vs 8,522; #43 +55%).
+   KEY finding for Phase 2: stride-2 anchors cost −2.7 strict on e6 (81.5→78.8)
+   — read DENSITY is a first-order accuracy knob; the heartbeat sweep must
+   measure it, and the finalization pass likely keeps dense reads (now cheap:
+   140s stride-1 4-cam local). f66 rebuild pending (no GT — low priority).
 B. **Kit-aware identity on e6** (#22 has a same-number opponent; c2a showed
    kit-awareness is worth up to +26pts on affected players — likely ~+1pt mean).
 C. **#43 far-court FR diagnosis** (worst cell in the failure heatmap).
