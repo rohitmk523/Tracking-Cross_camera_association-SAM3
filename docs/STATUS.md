@@ -308,6 +308,30 @@ proximity over time), and shot make/miss detection already lives in its own
 dedicated system that this pipeline will consume timestamps from. It is scoped,
 not started.
 
+## Part 7 — Event detection (NEW workstream, first measured milestone)
+
+The pipeline now attributes GAME EVENTS, compared against the operator's full
+219-play log for one complete game: WHO made each play, and for shots, from which
+scoring zone (this venue has a 4-point line; we extracted the zone geometry from
+the court paint itself — the white 3PT line matches our court model within 1cm,
+the red 4PT line fits a clean arc at ~9.4m).
+
+First full-game numbers (identity + ball + possession logic, GT timestamps as
+triggers; held-out portion never used during development):
+
+| Metric | Development (161 plays) | Held-out (58 plays) |
+|---|---|---|
+| WHO (correct player, all play types) | 50% | 45% |
+| Scoring zone (2/3/4PT, shots) | 61% | 57% |
+| Free throws | 87% WHO, 100% zone | — |
+
+What limits it today, honestly: the ball is only detected in 3-12%% of frames
+(small, blurred, hand-occluded — and only ~1,250 ball examples in training).
+Attribution is right when ball evidence exists; the roadmap fix is more ball
+training data + a ball-focused retrain, which shares a job with the planned
+detector consolidation. Turnover/steal/block rules and integration with the
+shot-detection system's timestamps are the next layers.
+
 ## Appendix A — How a player is tracked, start to finish
 
 1. **Detect** every player, every frame, every camera (solved, 96–100%).
