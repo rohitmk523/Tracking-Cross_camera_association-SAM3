@@ -144,6 +144,14 @@ def main() -> int:
         t0 = time.monotonic()
         run([sys.executable, "scripts/hybrid_track.py",
              "--game", a.game, "--tag", a.tag, "--out-dir", f"runs/hybrid_{name}"])
+        # dual-number streams get kit-suffixed copies (n3 -> n3B/n3W); the scorer
+        # disambiguates via kit-tagged anchors, the stream file is shared
+        for num in a.dual_numbers.split(","):
+            for ang in ANGLES:
+                src = REPO / f"runs/hybrid_{name}/{key}__n{num}__{ang}.json"
+                if src.exists():
+                    for kk in ("B", "W"):
+                        shutil.copy2(src, src.with_name(f"{key}__n{num}{kk}__{ang}.json"))
         t["track"] = time.monotonic() - t0
 
         t0 = time.monotonic()
