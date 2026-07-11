@@ -125,7 +125,7 @@ def main() -> int:
     g = next(x for x in gj["working_games"] if x["gid8"] == a.gid8)
     pfx = g["s3_prefix"].rstrip("/")
     _, date, full = pfx.split("/")
-    offsets = json.dumps(OFFSETS[a.gid8]).replace('"', '\\"')
+    offsets = json.dumps(OFFSETS[a.gid8])
 
     def presign(op, key_, exp):
         return s3.generate_presigned_url("get_object" if op == "get" else "put_object",
