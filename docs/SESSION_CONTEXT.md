@@ -142,6 +142,25 @@ via GT_DETS_DIR; kit-copy step required for dual streams — n3→n3B/n3W).
 | yolo11s | .766 | .844 | 1578s | 67.2 | 6857 |
 | yolo11m | .762 | .816 | 1560s | 60.3 | 6756 |
 
+**PHASE 1+2 COMPLETE (2026-07-11 evening).** Phase 1 (batching, GATED, commit
+78c1fd1): jersey_stack.read_crops (batched 3-stage), anchors sequential-decode +
+inline kit shades, annotate_anchor_kits fast path — OCR+kits 1230s→82s (15×);
+kit clustering 0.12s. Phase 2 verdicts (ALL work-reduction FAILED offline gates,
+5 consistent density datapoints): triggered OCR (scripts/extract_jersey_anchors_
+triggered.py, state machine) −2.9 strict at 78% crops → LIVE profile only;
+stride-2 detection (scripts/make_stride2_dets.py sim) 0.821/0.862 vs 0.831/0.892
+→ rejected; pose-subset skipped (untracked picks lose sole07). **OPERATING POINT
+(offline): yolo26s + dense STRIDE-1 anchors everywhere — e6 81.5/85.5 (ft-KPR),
+c2a 0.831/0.892 = NEW champion (beats RF-DETR lane 0.810/0.856). Laptop ~9.4
+min/game-min.** #6 e6 outlier (−8 vs RF-DETR) = wrong-pick in FR(0.633)/NR(0.747),
+same cells as #43/#22 → identity discrimination in right-side crowds, not
+detection. TRAP: sweep first run scored 0.22 everywhere — forgot GT_DETS_DIR in
+solve_player_xcam call (the classic artifact; env var now supported there too).
+NEXT: Phase 3 = CoreML/ANE exports (detect+OCR 2-3×, target ~4-5 min/game-min),
+4th-class retrain (~$3, ball gate ≥0.855), AGX TensorRT (awaiting engineer
+answers to docs/JETSON_STREAMING_QUESTIONS.md). Accuracy: kit-aware e6 #22,
+#6/FR-NR fix, flywheel 2.
+
 **DECISION (user, 2026-07-11): yolo26s IS the production detector from now on.**
 Optimization roadmap: docs/OPTIMIZATION_PLAN.md (phases: waste removal -> triggered
 OCR/stride gates -> CoreML/TensorRT + 4th-class; accuracy track in parallel).
