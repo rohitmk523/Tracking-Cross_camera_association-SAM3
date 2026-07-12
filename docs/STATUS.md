@@ -316,21 +316,33 @@ scoring zone (this venue has a 4-point line; we extracted the zone geometry from
 the court paint itself — the white 3PT line matches our court model within 1cm,
 the red 4PT line fits a clean arc at ~9.4m).
 
-First full-game numbers (identity + ball + possession logic, GT timestamps as
-triggers; held-out portion never used during development):
+Full-game accuracy against the 219-play operator log:
 
-| Metric | Development (161 plays) | Held-out (58 plays) |
-|---|---|---|
-| WHO (correct player, all play types) | 50% | 45% |
-| Scoring zone (2/3/4PT, shots) | 61% | 57% |
-| Free throws | 87% WHO, 100% zone | — |
+| Metric | Result |
+|---|---|
+| WHO — correct player (all 219 plays) | **49%** |
+| Point value — 2 / 3 / 4-point zone, on shots | **62%** |
+| Player AND points both correct, on shots | **44%** |
+| Free throws (WHO / zone) | **87% / 100%** |
 
-What limits it today, honestly: the ball is only detected in 3-12%% of frames
-(small, blurred, hand-occluded — and only ~1,250 ball examples in training).
-Attribution is right when ball evidence exists; the roadmap fix is more ball
-training data + a ball-focused retrain, which shares a job with the planned
-detector consolidation. Turnover/steal/block rules and integration with the
-shot-detection system's timestamps are the next layers.
+How to read these: the system watches a full game and, for each play, names the
+player and — for shots — reads which scoring zone he shot from (this venue has a
+4-point line; we extracted the zone geometry from the court paint, the 3-point line
+matching our court model within 1cm). Make-or-miss itself comes from the separate
+shot-detection system; combine it with our 44% "player + points" and you get the
+complete scoring event ("Fui Martinez, 4-point make"). WHO is far above the ~8%
+random baseline over 13 players, and free throws are near-solved (fixed position).
+
+**What the ceiling is, honestly.** We upgraded the ball detector dramatically
+(coverage 3-12% → 47-74% of frames, a dedicated all-angle specialist) and it moved
+WHO by less than 1 point. So ball visibility was *not* the limiter. The limiter is
+the possession→shooter attribution itself — when players cluster, "nearest to the
+ball" is a weak indicator of the actual handler, and no aggregation rule we tested
+fixed it. The real next lever is integrating the shot-detection system's shot
+*origin* (when + where the ball left toward the hoop) with our identity-at-location,
+rather than re-deriving possession frame-by-frame. Turnover/steal/block rules are a
+further layer. A visual GT-vs-prediction reel accompanies this report
+(`event_demo.mp4`).
 
 ## Appendix A — How a player is tracked, start to finish
 

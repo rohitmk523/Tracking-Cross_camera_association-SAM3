@@ -213,9 +213,16 @@ def main() -> int:
                     pred_zone = ("2PT" if d < zones["three_pt_r_cm"]
                                  else "3PT" if d < zones["four_pt_r_cm"][side]
                                  else "4PT")
+        gt_zone = ("4PT" if cls.startswith("4PT") else "3PT" if cls.startswith("3PT")
+                   else "2PT" if is_shot else None)
+        who_ok = (pred_name is not None and play.get("a") is not None
+                  and pred_name.rstrip("?").split()[-1] == play["a"].split()[-1])
+        zone_ok = (pred_zone == gt_zone) if (is_shot and pred_zone) else None
         ev = {"label": cls, "t": play["t"],
               "pred_player": pred_name, "pred_zone": pred_zone if is_shot else None,
-              "gt_player": play.get("a"), "confidence": 0.9, "source": "cv"}
+              "gt_player": play.get("a"), "gt_zone": gt_zone,
+              "who_ok": who_ok, "zone_ok": zone_ok,
+              "confidence": 0.9, "source": "cv"}
         out_events.append(ev)
         who_ok = (pred_name is not None and play.get("a") is not None
                   and pred_name.rstrip("?").split()[-1] == play["a"].split()[-1])
