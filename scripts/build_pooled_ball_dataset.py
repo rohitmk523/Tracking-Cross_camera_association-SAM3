@@ -50,16 +50,16 @@ def main() -> int:
                 continue
             for lf in llab.glob("*.txt"):
                 lines = [ln.split() for ln in lf.read_text().splitlines() if ln.strip()]
-                out_lines, has_ball = [], False
+                out_lines = []
                 for ln in lines:
                     c = int(ln[0])
                     if c not in remap:
                         continue
-                    nc = remap[c]
-                    if nc == 0:
-                        has_ball = True
-                    out_lines.append(" ".join([str(nc)] + ln[1:]))
-                if not has_ball or game_of(lf.stem) in EXCLUDE_GAMES:
+                    out_lines.append(" ".join([str(remap[c])] + ln[1:]))
+                # KEEP any image with a ball OR hoop label — earlier we required a
+                # ball, which discarded ~4.6k hoop-only frames and starved the hoop
+                # class (hoop mAP 0.588). Now the hoop gets its full ~10k labels.
+                if not out_lines or game_of(lf.stem) in EXCLUDE_GAMES:
                     continue
                 img = next((limg / (lf.stem + ext) for ext in (".jpg", ".png", ".jpeg")
                             if (limg / (lf.stem + ext)).exists()), None)
@@ -75,7 +75,7 @@ def main() -> int:
     val_g = set(games[int(n * 0.80):int(n * 0.92)])
     print(f"pooled ball-bearing images: {len(items)} from {n} games; per source {dict(per_src)}")
 
-    counts = defaultdict(lambda: [0, 0])          # split -> [imgs, ball boxes]
+    counts = defaultdict(lambda: [0, 0, 0])       # split -> [imgs, ball, hoop]
     for split in ("train", "valid", "test"):
         (OUT / split / "images").mkdir(parents=True, exist_ok=True)
         (OUT / split / "labels").mkdir(parents=True, exist_ok=True)
@@ -90,8 +90,10 @@ def main() -> int:
         dl.write_text("\n".join(lines) + "\n")
         counts[split][0] += 1
         counts[split][1] += sum(1 for ln in lines if ln.startswith("0 "))
+        counts[split][2] += sum(1 for ln in lines if ln.startswith("1 "))
     for split in ("train", "valid", "test"):
-        print(f"  {split}: {counts[split][0]} imgs, {counts[split][1]} Basketball boxes")
+        print(f"  {split}: {counts[split][0]} imgs, {counts[split][1]} Basketball, "
+              f"{counts[split][2]} Hoop boxes")
 
     (OUT / "data.yaml").write_text(
         f"path: {OUT}\ntrain: train/images\nval: valid/images\ntest: test/images\n"
