@@ -71,7 +71,7 @@ feet-zone (62%). Make/miss = consume their p3 model.
    (detect_events.py has the timeline; rebound = first possession after a p3 MISS).
 
 ## IN-FLIGHT JOBS (gate on INSTANCE STATE, never shared log/results keys)
-- **Ball+HOOP CORRECTED retrain**: in flight 2026-07-13 (split-fix dataset: 11,788
+- **Ball+HOOP CORRECTED retrain**: instance **i-02faf6eebfc88f248**, in flight 2026-07-13 (split-fix dataset: 11,788
   imgs, train hoop 9,992 labels incl 1,415 shot-frames). ~$3. WATCHER RULE: gate on
   describe-instances == terminated AND treat empty API response as "still running"
   (previous watcher fetched an epoch-22 mid-run checkpoint on a blank response).
