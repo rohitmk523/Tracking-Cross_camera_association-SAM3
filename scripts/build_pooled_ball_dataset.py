@@ -35,7 +35,13 @@ GID_RE = re.compile(r"([0-9a-f]{8})")
 
 def game_of(stem: str) -> str:
     m = GID_RE.search(stem)
-    return m.group(1) if m else stem[:8]
+    # gid-named frames group by game (whole-game holdout, no temporal leakage).
+    # no-gid frames (e.g. far-angle 'frame_00001_make_LEFT' shot frames) get a
+    # UNIQUE key each so they distribute across train/val/test — otherwise they
+    # all collapse to one pseudo-game and land entirely in one split (the bug
+    # that dumped 1,776 shot-frame hoop images into test, unseen by training).
+    # The hoop is static so per-frame leakage is negligible.
+    return m.group(1) if m else f"nogid_{stem}"
 
 
 def main() -> int:
