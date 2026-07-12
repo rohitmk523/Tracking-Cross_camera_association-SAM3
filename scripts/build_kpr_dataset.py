@@ -62,6 +62,8 @@ def main() -> int:
     ap.add_argument("--min-h", type=int, default=90)
     ap.add_argument("--max-per-id-cam", type=int, default=120)
     ap.add_argument("--out", default="data/kpr_finetune")
+    ap.add_argument("--pid-prefix", default="", help="namespace identities across games (e.g. c2a_)")
+    ap.add_argument("--append", action="store_true", help="add to an existing --out (multi-game)")
     ap.add_argument("--dual-numbers", default="1,3,5",
                     help="numbers worn by BOTH teams (from roster) — only these split into B/W")
     a = ap.parse_args()
@@ -162,11 +164,11 @@ def main() -> int:
     rng.shuffle(rows)
     for num, shade, ang, cf, di, b in rows:
         if num in split_thr:
-            pid = f"{num}{'W' if shade >= split_thr[num] else 'B'}"
+            pid = f"{a.pid_prefix}{num}{'W' if shade >= split_thr[num] else 'B'}"
         else:
             # single-team number, or dual whose reads come ~entirely from one kit
             # (kit-opposed test failed => one player dominates; minor label noise accepted)
-            pid = str(num)
+            pid = f"{a.pid_prefix}{num}"
         if kept[(pid, ang)] >= a.max_per_id_cam:
             continue
         img = read_frame(ang, cf)
@@ -209,10 +211,17 @@ def main() -> int:
         counts[pid] += 1
     for c in caps.values():
         c.release()
-    manifest = {"game": a.game, "tag": a.tag, "split_thresholds": split_thr,
-                "identities": dict(sorted(counts.items())),
+    mpath = outd / "manifest.json"
+    games = []
+    if a.append and mpath.exists():
+        old = json.loads(mpath.read_text())
+        games = old.get("games", [])
+        for k, v in old.get("identities", {}).items():
+            counts[k] = counts.get(k, 0) + v if k in counts else v
+    games.append({"game": a.game, "tag": a.tag, "prefix": a.pid_prefix, "split": split_thr})
+    manifest = {"games": games, "identities": dict(sorted(counts.items())),
                 "total": int(sum(counts.values()))}
-    (outd / "manifest.json").write_text(json.dumps(manifest, indent=1))
+    mpath.write_text(json.dumps(manifest, indent=1))
     print(f"dataset: {manifest['total']} crops, {len(counts)} identities -> {outd}")
     print("per identity:", dict(sorted(counts.items())))
     return 0
