@@ -30,6 +30,9 @@ def main() -> int:
     ap.add_argument("--gid8", default="e6fba750")
     ap.add_argument("--weights", default=None, help="ball specialist best.pt (local path)")
     ap.add_argument("--conf", type=float, default=0.15)
+    ap.add_argument("--chunks", default=",".join(CHUNKS))
+    ap.add_argument("--stride", type=int, default=1, help="ball detect every Nth frame")
+    ap.add_argument("--failsafe", type=int, default=5400)
     ap.add_argument("--fetch", action="store_true")
     ap.add_argument("--i-rotated-creds", action="store_true")
     a = ap.parse_args()
@@ -70,13 +73,13 @@ def main() -> int:
 
     dls = "\n".join(f'curl -s -L "{u}" -o "videos/{a.gid8}_{ang}.mp4" & DLPIDS="$DLPIDS $!"'
                     for ang, u in video_urls.items())
-    chunk_lines = " ".join(CHUNKS)
+    chunk_lines = " ".join(a.chunks.split(","))
     ud = f"""#!/bin/bash
 exec > /var/log/ballc.log 2>&1
 export HOME=/root PYTHONUNBUFFERED=1 YOLO_CONFIG_DIR=/tmp/Ultralytics
 LOG_URL="{presign('put', J.log_key(tag2), 86400)}"
 (while true; do sleep 30; curl -s -T /var/log/ballc.log "$LOG_URL" >/dev/null 2>&1 || true; done) &
-(sleep 5400; echo "[boot] 1.5h failsafe"; shutdown -h now) &
+(sleep {a.failsafe}; echo "[boot] failsafe"; shutdown -h now) &
 PYBIN=""
 for P in /opt/pytorch/bin/python /usr/bin/python3; do
   if [ -x "$P" ] && $P -c "import torch,sys;sys.exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then PYBIN=$P; break; fi
