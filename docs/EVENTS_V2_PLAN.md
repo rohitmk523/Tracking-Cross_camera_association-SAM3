@@ -33,6 +33,22 @@ distance match, no re-calibration.
 
 ---
 
+## PLAN REVIEW (Fable, 2026-07-13) — two corrections to Part A/Step-1
+
+1. **Part A below is STALE where it uses their triangulated court-space release
+   point** — triangulation is rejected (their own verdict). The CURRENT WHO design
+   is scripts/detect_shots.py: our ball+hoop detections → arc apex at the hoop per
+   far camera → release instant → shooter = identity under the ball in IMAGE space.
+   Read Part A's matching idea through that lens; the court-space join is dead.
+2. **We do NOT need their extract_tracks at all.** It exists to run their frozen
+   far_v16 bundle — which we are retiring. Cleaner: our build_ball_cache already
+   produces per-frame ball+hoop detections; write a thin ADAPTER that emits their
+   P1 track-parquet schema (per shot window, per angle: t, ball_x/y/conf,
+   rim_x/y/w/h) from our caches, for (a) their 185 labeled shots and (b) e6's 133
+   windows. Then their P2 (features) and P3 (retrain, seed 42, LOGO ≥0.949) run
+   UNCHANGED on top. One detector (ours), their proven feature+model recipe, no
+   frozen-bundle/S3-work-prefix plumbing.
+
 ## Part A — Shot-origin attribution (the WHO fix)
 
 **Algorithm (replaces frame-by-frame possession for shots):**
