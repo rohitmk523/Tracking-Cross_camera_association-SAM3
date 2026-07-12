@@ -83,6 +83,37 @@ because the shot gives a precise time+place to look.
 
 **Gate everything on the 219-play GT**, same as v1, per event type.
 
+## Step 1 runtime — how to run THEIR make/miss pipeline on e6 (verified by code read)
+
+Repo: `../uball_shot_detection_dual_fusion_v2`. Their pipeline, in order:
+1. `pipeline/extract_tracks.py --game-id <e6-uuid>` — needs:
+   - **Frozen detector bundle** from S3 (`FROZEN_BUNDLE_S3` in `pipeline/common.py`;
+     it's the immutable v1 far+near YOLO weights + config, sha256-verified).
+   - **e6 in their manifest** (`data/games_manifest.json`): each Game has
+     `game_id`, `s3_prefix` → `video_s3_uri(game, angle, bucket)` locates the 4
+     videos in `uball-videos-production`. ADD e6's row (gid + court-a prefix) if
+     absent.
+   - **Shot windows from Supabase**: `load_gt_shots(game_id)` reads the plays →
+     `shot.buffered_window()`. e6 has 133 shots → 133 windows.
+   - Detection is ultralytics YOLO; runs on MPS (`device="mps"`) locally or CUDA on
+     their g4dn-spot AWS pattern (docs/04). Only shot windows are processed → fast.
+   - Output: P1 tracks `s3://uball-cv-results/.../dual-fusion-v2/tracks/<gid>/…` (or
+     local).
+2. `pipeline/p2_dataset.py` → per-shot features (frac_inside_rim, arc fit, bounce-out,
+   through_hoop) → `data/p2_features*.parquet`. Local CPU.
+3. `pipeline/p3_angleaware.py` applies `data/p3_model_angleaware.joblib` (HGB, 0.955
+   acc) → make/miss per shot. Local CPU.
+4. Score make/miss vs the plays `classification` column (…_MAKE / …_MISS).
+
+Env: their `far_angle` conda (ultralytics/opencv/torch) — or our .venv works for the
+YOLO/parquet parts. Supabase via the plays REST (they use a service key in their .env).
+
+**Detector A/B (optional):** to use OUR retrained ball+hoop yolo26s instead of far_v16,
+re-extract P2 features on their 185 labeled shots with our detector, retrain the P3
+HGB (deterministic seed 42, whole-game LOGO split), and only adopt if it beats 0.949
+LOGO. Their P3 was trained on far_v16 features, so a naive detector swap will shift the
+feature distribution — retrain P3, don't just swap.
+
 ## What I need from you
 
 1. **Access to run/read the shot-detection system's e6 shot outputs** — the
