@@ -27,6 +27,7 @@ def main() -> int:
     ap.add_argument("--device", default="mps")
     ap.add_argument("--weights", default=WEIGHTS)
     ap.add_argument("--ball-class", type=int, default=2, help="2=yolo26s, 0=Basketball specialist")
+    ap.add_argument("--classes", default=None, help="comma list e.g. 0,1 (ball+hoop); overrides --ball-class")
     a = ap.parse_args()
     from ultralytics import YOLO
     import cv2
@@ -36,22 +37,24 @@ def main() -> int:
     outd.mkdir(parents=True, exist_ok=True)
     for ang in ANGLES:
         cap = cv2.VideoCapture(str(REPO / f"data/clips/{a.game}_{ang}_{a.tag}.mp4"))
-        boxes, scores, fidx = [], [], []
+        boxes, scores, fidx, clss = [], [], [], []
+        want = [int(x) for x in a.classes.split(",")] if a.classes else [a.ball_class]
         f, t0 = 0, time.time()
         while True:
             ok, img = cap.read()
             if not ok:
                 break
             r = model.predict(img, imgsz=1280, conf=a.conf, device=a.device,
-                              classes=[a.ball_class], verbose=False)[0]
-            for b, s in zip(r.boxes.xyxy.cpu().numpy(), r.boxes.conf.cpu().numpy()):
+                              classes=want, verbose=False)[0]
+            for b, sc, cl in zip(r.boxes.xyxy.cpu().numpy(), r.boxes.conf.cpu().numpy(), r.boxes.cls.cpu().numpy()):
                 boxes.append(b.astype(np.float32))
-                scores.append(float(s))
+                scores.append(float(sc))
                 fidx.append(f)
+                clss.append(int(cl))
             f += 1
         cap.release()
         out = outd / f"{a.game}_{ang}_{a.tag}.ball.npz"
-        np.savez_compressed(out, boxes=np.stack(boxes) if boxes else np.zeros((0, 4), np.float32),
+        np.savez_compressed(out, classes=np.array(clss), boxes=np.stack(boxes) if boxes else np.zeros((0, 4), np.float32),
                             scores=np.array(scores), frame_idx=np.array(fidx))
         cov = len(set(fidx))
         print(f"{ang}: {len(boxes)} ball dets, {cov}/{f} frames covered "

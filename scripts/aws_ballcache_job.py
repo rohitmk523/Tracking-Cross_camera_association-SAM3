@@ -106,7 +106,7 @@ for CH in {chunk_lines}; do
       -y "data/clips/{a.gid8}_${{ANG}}_${{CH}}.mp4" || RC=1
   done
   $PYBIN scripts/build_ball_cache.py --game {a.gid8} --tag "$CH" --conf {a.conf} \\
-    --ball-class 0 --weights weights/ball.pt --device cuda || RC=1
+    --classes 0,1 --weights weights/ball.pt --device cuda || RC=1
   rm -f data/clips/{a.gid8}_*_"$CH".mp4
   tar czf results.tar.gz runs/ball_cache
   curl -sS -o /dev/null -T results.tar.gz "{presign('put', J.results_key(tag2), 86400)}" || true
