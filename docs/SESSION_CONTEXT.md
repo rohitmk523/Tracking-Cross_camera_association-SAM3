@@ -1,8 +1,106 @@
-# Session context — SAM3-free pipeline era (updated 2026-07-11)
+# Session context — SAM3-free pipeline era (updated 2026-07-12)
 
 Dense handoff for continuing work. Client-facing narrative lives in `docs/STATUS.md`
 (read it for the story); THIS file is the operational truth: numbers, paths, knobs,
 in-flight jobs, and traps already paid for.
+
+---
+
+# ══ SESSION 2026-07-12 — EVENTS WORKSTREAM + BALL/HOOP + KPR CYCLE 2 ══
+(read this block first; older blocks below are still valid history)
+
+## STATE OF PLAY (what is done, what is in flight)
+
+**ALL FOUR pipeline models are trained (one-time, apply to every game, NO per-game
+training):**
+1. Player/ref detector: yolo26s (production; runs/yolo26s-1280-ourdata-v1_fetch/…best.pt)
+2. Ball+HOOP specialist: yolo26s — **RETRAINING NOW** (see in-flight); prior weights
+   runs/ball_yolo26s_fetch/…/ball-yolo26s-1280-v1/weights/best.pt (ball 0.940, hoop
+   0.588 — hoop was STARVED by a dataset bug, now fixed, retraining).
+3. Jersey OCR stack: legibility ResNet18 + localizer YOLO11n + PARSeq (runs/jersey/*.pt)
+4. KPR appearance: **cycle-2 adopted** (/tmp/kpr/pretrained_models/kpr_uball_ft.pth.tar;
+   cycle-1 backup kpr_uball_ft_cyc1_bak.pth.tar). e6 = 81.7 strict / 86.2 fused.
+
+**Core tracking accuracy:** e6 81.7/86.2 (SAM3 was 88); c2a blind 83/89. KPR flywheel
+near ceiling (cycle-1 +0.9, cycle-2 +0.2 → no cycle-3 expected).
+
+**Events workstream (the ENDGAME):** measured on full-game e6 (219 GT plays):
+- WHO (player) 49% · point-zone (2/3/4PT) 62% · combined 44% · free throws 87%/100%.
+- Ball detection upgrade (0.855→0.953, coverage 1-8%→47-74%) did NOT move WHO (+0.5).
+  **Ball was not the bottleneck; the possession→shooter ATTRIBUTION is** (nearest-ball
+  picks wrong body in clusters; 3 methods all ≤49%). Diagnosed, logged, refuted.
+- Deliverable shipped: runs/tracking/event_demo_e6fba750.mp4 (14 plays, GT vs pred).
+
+## THE EVENTS v2 PLAN (how to break 49% — READ docs/EVENTS_V2_PLAN.md)
+
+Key exploration findings (shot-detection repo = ../uball_shot_detection_dual_fusion_v2):
+- **Triangulation FAILS for make/miss** (side-angle depth; their own verdict — 4 impls
+  chance-level). DO NOT build triangulation.
+- **Working make/miss = trained HGB model** `p3_model_angleaware.joblib` on far_v16
+  2D rim features. 0.955 acc / AUC 0.994 held-out, 0.949 LOGO. That's the "~95%".
+- Their detectors: far = `Training_frameworks/Uball Far Angle/deliverables/far_v16_best.pt`
+  (yolo11n ball+hoop), near = `../Uball_dual_angle_shot_detection/weights/near_angle_
+  weights/basketball_yolo11n3/weights/best.pt`.
+- Their runner: `pipeline/extract_tracks.py --game-id <uuid>` pulls GT shot windows from
+  Supabase plays, runs far+near detection on ONLY the ~133 shot windows (fast), →
+  P1 tracks → `p2_dataset.py` features → `p3_angleaware` make/miss. AWS pattern in
+  their docs/04 (g4dn spot) or local MPS.
+
+**Our WHO fix needs NO triangulation:** at the RELEASE instant (ball leaves hand, ~0.5s
+before apex), the ball sits ON the shooter in the image → shooter = identity whose box
+is under the ball. Our tracking already gives per-identity court (x,y). Points = our
+feet-zone (62%). Make/miss = consume their p3 model.
+
+**Post-training events build order (do this next session):**
+1. Fetch retrained ball+hoop weights; val hoop mAP (target: 0.588 → ~0.85+). If good,
+   this is our unified shot-detection detector. A/B vs far_v16 optional.
+2. Run make/miss on e6: EITHER their pipeline (extract_tracks→p2→p3 with far_v16, the
+   safe 95% path) OR retrain p3 on our detector's features (needs re-extract on their
+   185 labeled shots + LOGO validation). Score vs plays classification (MAKE/MISS).
+3. Build v2 WHO: scripts/detect_shots.py exists (shot-arc detection + release-instant
+   image-space ball-on-shooter). Tune + measure on the FULL 133 shots (NOT 3 sandbox
+   — overfits). Needs full-game ball+hoop cache (in flight) + identity tracks per chunk.
+4. Score events v2 vs 219 GT: shot recall, WHO (vs 49%), zone, make/miss. Save all.
+5. Possession-change layer (rebound/steal/turnover) on possession timeline + shot events
+   (detect_events.py has the timeline; rebound = first possession after a p3 MISS).
+
+## IN-FLIGHT JOBS (gate on INSTANCE STATE, never shared log/results keys)
+- **Ball+HOOP retrain**: launching (background task by9d4qapp); yolo26s @1280 120ep on
+  the FIXED pooled dataset (11,788 imgs, hoop 3804→7282 labels). ~$3. Watcher: arm one.
+  Fetch: `aws_ball_train_job.py --fetch --model yolo26s` → runs/ball_yolo26s_fetch/.
+- **Full-game e6 ball+HOOP cache**: instance i-01c31a7b4f20bd9f8 (~$1.5), watcher
+  b5vw5mee3 → runs/ball_cache/e6fba750_{ang}_{chunk}.ball.npz (classes 0 ball, 1 hoop).
+  NOTE: this used the OLD ball weights; may rerun with retrained weights for shots.
+
+## KEY FILES ADDED THIS SESSION
+- scripts/detect_events.py — v1 events engine (possession + attribution, 49% ceiling).
+- scripts/detect_shots.py — v2 shot detector (ball+hoop arc + release WHO), POC.
+- scripts/build_ball_cache.py — ball(+hoop via --classes 0,1) cache builder.
+- scripts/build_pooled_ball_dataset.py — pools far+near+consolidated (FIXED: keep
+  ball-OR-hoop images; e6 excluded via EXCLUDE_GAMES).
+- scripts/aws_ball_train_job.py, aws_ballcache_job.py — ball/hoop AWS jobs.
+- scripts/render_event_demo.py — GT-vs-pred reel.
+- scripts/extract_court_zones.py + configs/court_zones_court-a.json — 3PT (model,
+  paint-validated ±1cm) + 4PT (fit L949.5/R939.8cm) scoring zones.
+- data/rosters/{e6,c2a,f66}.json (names+teams), data/plays/e6fba750_*.json (219 GT +
+  per-chunk), data/ball_pooled/ (retrain dataset).
+- docs/EVENTS_V2_PLAN.md, docs/JETSON_STREAMING_QUESTIONS.md.
+
+## TRAPS PAID FOR THIS SESSION (don't repeat)
+- Stale S3 results key: fetched Jul-10 KPR weights by mistake; ALWAYS gate on
+  describe-instances state, never log/results-key content.
+- Bare `wait` waited on the infinite log-uploader loop → hung 3 instances ($3.4);
+  wait on explicit download PIDs only.
+- offsets single-quote bug + grep swallowing the traceback → silent rc=1 (don't
+  grep-filter stage output in job userdata).
+- Ball-cache 1.5h failsafe too tight for 6 chunks @1280 (~2h) → use --failsafe 9000.
+- Pooled dataset "require ball" filter starved hoop (0.588). Fixed.
+- KPR PK-sampler: batch/num_instances ≤ #usable-ids (verify loss≠0 + weights differ).
+- detect_events / solve_player_xcam grading needs GT_DETS_DIR pointing at RF-DETR
+  backups when a different detector's dets are swapped in.
+
+---
+
 
 ## 1. Where the project stands
 
