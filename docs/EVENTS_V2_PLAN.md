@@ -108,7 +108,16 @@ Repo: `../uball_shot_detection_dual_fusion_v2`. Their pipeline, in order:
 Env: their `far_angle` conda (ultralytics/opencv/torch) — or our .venv works for the
 YOLO/parquet parts. Supabase via the plays REST (they use a service key in their .env).
 
-**Detector A/B (optional):** to use OUR retrained ball+hoop yolo26s instead of far_v16,
+**DECISION (user, 2026-07-13): far_v16 is RETIRED from our stack — the unified
+corrected ball+hoop yolo26s is the shot detector.** The A/B below is therefore the
+MANDATORY path (retrain P3 on our features), not optional; far_v16 survives only as
+a fallback if our P3 misses the 0.949 LOGO benchmark. Prerequisite state: corrected
+retrain (shot-frame split fix: train shot-frame hoops 0->1,415) must be fetched
+(instance terminated) and hoop mAP verified on the CLEAN valid split (~0.90
+expected); then REBUILD the full-game e6 ball+hoop cache with the new weights
+(old-weights cache quarantined in runs/ball_cache_oldweights/).
+
+**Detector A/B (now mandatory):** to use OUR retrained ball+hoop yolo26s instead of far_v16,
 re-extract P2 features on their 185 labeled shots with our detector, retrain the P3
 HGB (deterministic seed 42, whole-game LOGO split), and only adopt if it beats 0.949
 LOGO. Their P3 was trained on far_v16 features, so a naive detector swap will shift the

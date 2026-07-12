@@ -14,9 +14,13 @@ in-flight jobs, and traps already paid for.
 **ALL FOUR pipeline models are trained (one-time, apply to every game, NO per-game
 training):**
 1. Player/ref detector: yolo26s (production; runs/yolo26s-1280-ourdata-v1_fetch/…best.pt)
-2. Ball+HOOP specialist: yolo26s — **RETRAINING NOW** (see in-flight); prior weights
-   runs/ball_yolo26s_fetch/…/ball-yolo26s-1280-v1/weights/best.pt (ball 0.940, hoop
-   0.588 — hoop was STARVED by a dataset bug, now fixed, retraining).
+2. Ball+HOOP specialist: yolo26s — **CORRECTED RETRAIN IN FLIGHT** (2026-07-13).
+   TWO dataset bugs found+fixed: (a) "require ball" filter starved hoop (0.588);
+   (b) 1,776 far-angle SHOT-FRAME hoop imgs (frame_*_make_LEFT, no gid) collapsed
+   into one pseudo-game -> ALL in test, ZERO in training (test hoop 0.53 vs valid
+   0.90 was a split artifact). Fix: unique key per no-gid frame -> train shot-frames
+   0->1,415. Old fetches DELETED (were epoch-22 bad-split). Fetch only AFTER
+   instance TERMINATED: aws_ball_train_job.py --fetch --model yolo26s.
 3. Jersey OCR stack: legibility ResNet18 + localizer YOLO11n + PARSeq (runs/jersey/*.pt)
 4. KPR appearance: **cycle-2 adopted** (/tmp/kpr/pretrained_models/kpr_uball_ft.pth.tar;
    cycle-1 backup kpr_uball_ft_cyc1_bak.pth.tar). e6 = 81.7 strict / 86.2 fused.
@@ -54,9 +58,11 @@ feet-zone (62%). Make/miss = consume their p3 model.
 **Post-training events build order (do this next session):**
 1. Fetch retrained ball+hoop weights; val hoop mAP (target: 0.588 → ~0.85+). If good,
    this is our unified shot-detection detector. A/B vs far_v16 optional.
-2. Run make/miss on e6: EITHER their pipeline (extract_tracks→p2→p3 with far_v16, the
-   safe 95% path) OR retrain p3 on our detector's features (needs re-extract on their
-   185 labeled shots + LOGO validation). Score vs plays classification (MAKE/MISS).
+2. Make/miss — **DECISION (user, 2026-07-13): retire far_v16, use OUR detector**.
+   Run track extraction on their 185 labeled shots with our corrected ball+hoop
+   yolo26s -> re-extract P2 features -> RETRAIN P3 HGB (their recipe: seed 42,
+   whole-game LOGO). Adopt iff LOGO >= ~0.949 (their benchmark). far_v16 = fallback
+   only if ours underperforms. Then score e6 make/miss vs plays classification.
 3. Build v2 WHO: scripts/detect_shots.py exists (shot-arc detection + release-instant
    image-space ball-on-shooter). Tune + measure on the FULL 133 shots (NOT 3 sandbox
    — overfits). Needs full-game ball+hoop cache (in flight) + identity tracks per chunk.
@@ -65,12 +71,17 @@ feet-zone (62%). Make/miss = consume their p3 model.
    (detect_events.py has the timeline; rebound = first possession after a p3 MISS).
 
 ## IN-FLIGHT JOBS (gate on INSTANCE STATE, never shared log/results keys)
-- **Ball+HOOP retrain**: launching (background task by9d4qapp); yolo26s @1280 120ep on
-  the FIXED pooled dataset (11,788 imgs, hoop 3804→7282 labels). ~$3. Watcher: arm one.
-  Fetch: `aws_ball_train_job.py --fetch --model yolo26s` → runs/ball_yolo26s_fetch/.
-- **Full-game e6 ball+HOOP cache**: instance i-01c31a7b4f20bd9f8 (~$1.5), watcher
-  b5vw5mee3 → runs/ball_cache/e6fba750_{ang}_{chunk}.ball.npz (classes 0 ball, 1 hoop).
-  NOTE: this used the OLD ball weights; may rerun with retrained weights for shots.
+- **Ball+HOOP CORRECTED retrain**: in flight 2026-07-13 (split-fix dataset: 11,788
+  imgs, train hoop 9,992 labels incl 1,415 shot-frames). ~$3. WATCHER RULE: gate on
+  describe-instances == terminated AND treat empty API response as "still running"
+  (previous watcher fetched an epoch-22 mid-run checkpoint on a blank response).
+- **Full-game e6 ball+hoop cache**: DONE but built with OLD weak-hoop weights →
+  QUARANTINED to runs/ball_cache_oldweights/. REBUILD with corrected weights via
+  aws_ballcache_job.py (--chunks all, --failsafe 9000) before shot detection.
+- STALE DATA SWEPT (2026-07-13): bad-split fetch deleted; old ball caches
+  quarantined; contaminated emb cache deleted; cycle-1 KPR dataset copies deleted;
+  stale S3 results keys (ballce6f, ball_yolo26s bad-split) REMOVED so premature
+  fetches fail loudly.
 
 ## KEY FILES ADDED THIS SESSION
 - scripts/detect_events.py — v1 events engine (possession + attribution, 49% ceiling).
