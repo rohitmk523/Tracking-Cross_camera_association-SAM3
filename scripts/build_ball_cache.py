@@ -26,6 +26,7 @@ def main() -> int:
     ap.add_argument("--conf", type=float, default=0.08)
     ap.add_argument("--device", default="mps")
     ap.add_argument("--weights", default=WEIGHTS)
+    ap.add_argument("--ball-class", type=int, default=2, help="2=yolo26s, 0=Basketball specialist")
     a = ap.parse_args()
     from ultralytics import YOLO
     import cv2
@@ -42,7 +43,7 @@ def main() -> int:
             if not ok:
                 break
             r = model.predict(img, imgsz=1280, conf=a.conf, device=a.device,
-                              classes=[2], verbose=False)[0]
+                              classes=[a.ball_class], verbose=False)[0]
             for b, s in zip(r.boxes.xyxy.cpu().numpy(), r.boxes.conf.cpu().numpy()):
                 boxes.append(b.astype(np.float32))
                 scores.append(float(s))
