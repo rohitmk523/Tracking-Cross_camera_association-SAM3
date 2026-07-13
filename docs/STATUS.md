@@ -476,6 +476,27 @@ dual-number handling (kit-anchor density, and the bigger-jersey-numbers
 venue request) is now the single highest-leverage WHO lever; the attribution
 logic itself needs no rework for clean-jersey games.
 
+### Part 9 — WHO improvement round 1 (2026-07-14)
+
+First working session of docs/WHO_MASTER_PLAN.md. Adopted (every change
+positive on all three games): dual numbers now tracked as separate per-kit
+streams from birth; a widened attribution window; and release-quality
+play-matching (each detected arc scores how cleanly the ball sits in a
+body's hands at release; plays match the cleanest arc, not the nearest).
+
+| game | WHO | zone |
+|---|---|---|
+| e6 | 62% -> **69%** | 79% -> **87%** |
+| 2c490f1a (blind) | 59% -> **63%** | 72% -> **75%** |
+| c2a (blind, 5 duals) | 37% -> **40%** | 64% -> **70%** |
+
+Measured and rejected on the way (the plan's discipline): anchor-kit
+sparsity (tags are 99.9% dense), a possession-derived team prior (52%
+accurate — a coin flip), three release-snap variants. New sharp diagnosis
+for c2a's remaining gap: the correct player's track exists for 79% of its
+shots — the loss is the RELEASE INSTANT in tip/putback chains, next
+attacked via W2 (multi-game signal fusion) and W3 (appearance recovery).
+
 ## Appendix A — How a player is tracked, start to finish
 
 1. **Detect** every player, every frame, every camera (solved, 96–100%).
