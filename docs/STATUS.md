@@ -1,4 +1,5 @@
 # Cross-Camera Basketball Tracking — Status Report
+**Last updated: 2026-07-13** (Part 9 — the blind second game — is the newest section.)
 
 **What the system does:** from the four cameras already installed in the gym, work out
 **who** is on court (team + jersey number), **where** each player is (top-down court
@@ -401,6 +402,51 @@ wrist keypoints from the pose stack, cross-camera release agreement,
 appearance embeddings on the release crop, and possession chain-back. Only
 after that lands do we tune the remaining metrics, and only then do we run the
 second game (c2a) as a fully blind generalization test.
+
+## Part 9 — The blind second game (2026-07-13): full report in `docs/C2A_BLIND_RESULTS.md`
+
+**What happened from Friday (07-10) to today, in order.** Friday: SAM3 was
+retired and the pipeline rebuilt SAM3-free; the pose stack (player keypoints)
+and the appearance model fine-tune began. Weekend: the detector race was run
+END-TO-END from raw video on ground truth — yolo26s won and became the
+production detector; the pipeline was made laptop-runnable with accuracy UP,
+not down. Then the events workstream: a dedicated ball+hoop detector was
+trained (two dataset bugs found and fixed on the way — the hoop class went
+0.588→0.984); the proven make/miss "brain" of the shot-detection system was
+transplanted onto our detector and validated to transfer bit-for-bit
+(leave-game-out 0.958, equal to its own benchmark); event detection was
+re-architected around a shot trigger (v1 49% WHO at given timestamps →
+v2.2: 94% detection, 98% make/miss, 78% points, 69% shooter on e6); a
+dedicated crowd-attribution effort ran six controlled experiments with
+measured ceilings; a rebound/steal layer was added; and today the whole
+frozen system was pointed at a game it had never seen (c2a) with its log
+used exactly once — to score.
+
+**Blind result (details, per-type anatomy and fix queue: `docs/C2A_BLIND_RESULTS.md`):**
+shot detection **88%**, make/miss **95%**, rebounds **79%** — the engine
+generalizes. Zone 64%, shooter-WHO 37% — the two axes that need work.
+
+**Limitations, short:** (1) naming the shooter in crowds and on dual-number
+kits is the weakest link (c2a has five numbers worn by both teams — kit
+legibility halves the usable jersey anchors); (2) the e6-tuned WHO fusion did
+not carry to c2a and is benched until refit across both games; (3) the 3PT/4PT
+boundary suffers from distance-measurement compression at long range;
+(4) long-range games produce many rim interactions that are not GT shots
+(putbacks/tips) — a precision gate is queued; (5) turnovers/steals remain
+experimental. Everything else — triggers, make/miss, rebounds, court zones,
+clock alignment — held up blind.
+
+**How long one full game takes today (wall-clock, no accuracy trade):**
+
+| Platform | One ~60-min game, end to end | Notes |
+|---|---|---|
+| AWS (as run today) | **~4.5-5 h** | GPU stages ~2.5 h in parallel across 4 machines, then ~2 h tracking+identity on the laptop, ~30 min event chain |
+| MacBook Pro M4 Pro alone | **~9-10 h** | measured ~9.4 min per game-minute for the full stack, single machine, nothing uploaded |
+| Jetson AGX (venue box) | **estimated ~1-1.5× game length** (~60-90 min) once the TensorRT port lands; unmeasured today | the deployment target: models stream per-frame instead of batch; port is queued behind the venue-engineer questionnaire (`docs/JETSON_STREAMING_QUESTIONS.md`) |
+
+The AGX line is the goal state: the same models, quantized and streaming,
+watching the game as it happens; the laptop and cloud paths are how we develop
+and verify against ground truth today.
 
 ## Appendix A — How a player is tracked, start to finish
 
