@@ -22,9 +22,8 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parents[1]
 ANGLES = ("FL", "FR", "NL", "NR")
-OFFS = {"FL": 0, "FR": -11, "NL": -1, "NR": -1}
+from game_meta import GAME_OFFS, GAME_CHUNKS
 FPS = 29.97
-CHUNKS = ("0_600", "600_600", "1200_600", "1800_600", "2400_600", "3000_345")
 
 
 def load_chunk(game, tag):
@@ -39,7 +38,9 @@ def load_chunk(game, tag):
             if f not in ball[a] or s > ball[a][f][1]:
                 ball[a][f] = ([float(v) for v in b], float(s))
     tr = defaultdict(dict)
-    for p in (REPO / f"runs/events_fg_{tag}").glob(f"{game}_{tag}__n*__*.json"):
+    tdir = REPO / (f"runs/events_fg_{tag}" if game == "e6fba750"
+                   else f"runs/events_fg_{game[:3]}_{tag}")
+    for p in tdir.glob(f"{game}_{tag}__n*__*.json"):
         parts = p.stem.split("__")
         pl, a = "#" + parts[1][1:], parts[2]
         d = json.loads(p.read_text())["frames"]
@@ -70,7 +71,13 @@ def pick(ball, tr, ang, f):
 
 
 def main() -> int:
-    game = "e6fba750"
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--game", default="e6fba750")
+    a = ap.parse_args()
+    game = a.game
+    OFFS = GAME_OFFS[game]
+    globals()["OFFS"] = OFFS
     led = json.loads((REPO / f"runs/tracking/ledger/shots_{game}_full.json").read_text())
     plays = json.loads((REPO / f"data/plays/{game}_full.json").read_text())["plays"]
     gt = [p for p in plays if ("MAKE" in p["cls"] or "MISS" in p["cls"])]
@@ -78,9 +85,9 @@ def main() -> int:
     name_num = {}
     for pr in roster["players"]:
         name_num.setdefault(pr["name"].split()[-1], pr["num"])
-    data = {tag: load_chunk(game, tag) for tag in CHUNKS}
+    data = {tag: load_chunk(game, tag) for tag in GAME_CHUNKS[game]}
 
-    tot = cur_ok = o_trk_arc = o_trk_any = o_cam = o_win = 0
+    tot = cur_ok = o_trk_arc = o_trk_any = o_cam = o_win = o_num = 0
     per = defaultdict(lambda: [0, 0, 0, 0, 0, 0])
     for g in gt:
         cand = [o for o in led if abs(o["t"] - g["t"]) <= 1.5 and o.get("rel_f") is not None]
@@ -89,8 +96,20 @@ def main() -> int:
         o = min(cand, key=lambda o: abs(o["t"] - g["t"]))
         ball, tr = data[o["chunk"]]
         num = name_num.get(g["a"].split()[-1])
-        gt_ids = {pl for pl in tr if pl.lstrip("#").rstrip("BW").isdigit()
-                  and int(pl.lstrip("#").rstrip("BW")) == num}
+        rec = next((p for p in roster["players"]
+                    if p["name"].split()[-1] == g["a"].split()[-1]), None)
+        dual = sum(1 for p in roster["players"] if p["num"] == num) > 1
+        want_kit = ("B" if rec["team"] == 1 else "W") if (rec and dual) else None
+        num_ids, gt_ids = set(), set()
+        for pl in tr:
+            core = pl.lstrip("#")
+            kitc = core[-1] if core[-1] in ("B", "W") else None
+            dg = core.rstrip("BW")
+            if not dg.isdigit() or int(dg) != num:
+                continue
+            num_ids.add(pl)
+            if want_kit is None or kitc in (None, want_kit):
+                gt_ids.add(pl)
         if not gt_ids:
             continue
         tot += 1
@@ -121,10 +140,15 @@ def main() -> int:
         ta = any(near_gt(o["cam"], f) for f in win)
         o_trk_arc += ta
         row[2] += ta
-        tn = ta or any(near_gt(a, rel - OFFS[o["cam"]] + OFFS[a] + d)
-                       for a in ANGLES for d in (-9, -4, 0, 4, 9))
+        tn = ta or any(near_gt(a2, rel - OFFS[o["cam"]] + OFFS[a2] + d)
+                       for a2 in ANGLES for d in (-9, -4, 0, 4, 9))
         o_trk_any += tn
         row[3] += tn
+        hold = gt_ids
+        gt_ids = num_ids                 # number-level presence (any kit)
+        o_num += any(near_gt(a2, rel - OFFS[o["cam"]] + OFFS[a2] + d)
+                     for a2 in ANGLES for d in (-9, -4, 0, 4, 9))
+        gt_ids = hold
         names = {pl: pl for pl in tr}
         def is_gt(pl):
             return pl in gt_ids
@@ -140,6 +164,7 @@ def main() -> int:
         return f"{x}/{tot} ({x/tot:.0%})"
     print(f"harness n={tot} | CURRENT WHO {pc(cur_ok)}")
     print(f"oracle-track arc-cam {pc(o_trk_arc)} | ANY cam {pc(o_trk_any)}")
+    print(f"oracle-NUM-track any cam (any kit) {pc(o_num)}")
     print(f"oracle-cam  (E2 bound) {pc(o_cam)}")
     print(f"oracle-win  (+-0.3s, arc cam) {pc(o_win)}")
     print(f"\n{'class':<5} {'n':>3} {'cur':>4} {'trkA':>5} {'trk*':>5} {'cam':>4} {'win':>4}")

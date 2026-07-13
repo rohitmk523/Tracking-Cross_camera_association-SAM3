@@ -150,6 +150,23 @@ def main() -> int:
             sel = {f: {} for f in sorted(mf)}
         frames = sorted(sel)
 
+        # W1.2 (dual kits): untagged number-reads confirm BOTH kit streams of a
+        # dual number, converging them onto one body. When a kit stream has
+        # enough kit-TAGGED reads, require the tag for confirmation (untagged
+        # = neutral); carry propagates from the pure anchors. Sparse-tag
+        # streams keep the old permissive rule.
+        kit_strict = False
+        if kit is not None:
+            n_tagged = sum(1 for f in frames for ang in ANGLES
+                           for abox, anum, aconf, akit in anchors.get((ang, f), [])
+                           if anum == num and akit == kit)
+            kit_strict = n_tagged >= 6
+
+        def kit_ok(akit):
+            if kit is None:
+                return True
+            return akit == kit if kit_strict else akit in (None, kit)
+
         # --- 1. anchor court positions: frames where a jersey read of N confirms a SAM3 mask ---
         anchor_pos = {}                                # ref_frame -> court position (from anchors)
         for f in frames:
@@ -160,7 +177,7 @@ def main() -> int:
                 if not sr:
                     continue
                 for abox, anum, aconf, akit in anchors.get((ang, f), []):
-                    if anum == num and iou(sr["box"], abox) >= 0.3 and (kit is None or akit in (None, kit)):
+                    if anum == num and iou(sr["box"], abox) >= 0.3 and kit_ok(akit):
                         pts.append(court(ang, sr["box"], f + offs[ang])); ws.append(ZONE[ang] * aconf)
                         break
             if pts:
@@ -184,7 +201,10 @@ def main() -> int:
                 r = 0
                 for abox, anum, aconf, akit in anchors.get((ang, f), []):
                     if iou(sr["box"], abox) >= 0.3:
-                        r = 1 if (anum == num and (kit is None or akit in (None, kit))) else -1
+                        if anum == num and kit_strict and akit is None:
+                            r = 0          # untagged read on a dual: neutral
+                        else:
+                            r = 1 if (anum == num and kit_ok(akit)) else -1
                         break
                 read[f] = r
             # expand from every +1 frame forward and backward along present, non-contradicted mask

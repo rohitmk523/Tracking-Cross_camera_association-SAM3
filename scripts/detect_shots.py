@@ -107,6 +107,7 @@ def main() -> int:
     ap.add_argument("--tracks-glob", default="runs/events_fg_{tag}")
     ap.add_argument("--release-lead", type=float, default=0.5)
     ap.add_argument("--match-tol", type=float, default=1.5, help="s, GT match window")
+    ap.add_argument("--no-team-prior", action="store_true")
     a = ap.parse_args()
     from uball_cc.fusion.homography import load_calib, project_pixels
     offs = OFFS[a.game]
@@ -120,6 +121,37 @@ def main() -> int:
         by_num[pr["num"]].append(pr)
 
     kit_team = {"B": 1, "W": 2}          # roster: team1_color Black, team2 White
+
+    def team_of(pl):
+        n = int("".join(c for c in pl if c.isdigit()))
+        c = by_num.get(n, [])
+        if len(c) == 1:
+            return c[0]["team"]
+        kt = kit_team.get(pl[-1]) if pl and pl[-1] in ("B", "W") else None
+        return kt
+
+    # W1.3 team prior: the shooter is on the ATTACKING team. Attacking team at
+    # a shot = majority possessor-team over [t-5s, t-1s] (possession ledger —
+    # aggregates ~120 frames, far more reliable than instant attribution).
+    pos_segs = []
+    pos_path = REPO / f"runs/tracking/ledger/possession_{a.game}.json"
+    if pos_path.exists() and not a.no_team_prior:
+        pos_segs = json.loads(pos_path.read_text())["segments"]
+
+    def att_team(t_arrive):
+        lo, hi = (t_arrive - 5.0) * FPS, (t_arrive - 1.0) * FPS
+        w = {1: 0.0, 2: 0.0}
+        for f0, f1, pl in pos_segs:
+            ov = min(f1, hi) - max(f0, lo)
+            if ov <= 0:
+                continue
+            tm = team_of(pl)
+            if tm in w:
+                w[tm] += ov
+        if w[1] == w[2]:
+            return None
+        return 1 if w[1] > w[2] else 2
+
     def name_of(pl):
         n = int("".join(c for c in pl if c.isdigit()))
         c = by_num.get(n, [])
@@ -175,7 +207,7 @@ def main() -> int:
                     break                       # rise ends: earlier ball higher
             return rel
 
-        def attribute(arc_ang, rel_f):
+        def attribute(arc_ang, rel_f, atk=None):
             """WHO = the identity that HELD the ball leading into the release,
             not whoever's hands are at the ball at the release instant (a
             contesting defender reaches the ball exactly then — measured: FG
@@ -185,7 +217,7 @@ def main() -> int:
             score = defaultdict(float)
             for ang in [arc_ang] + [a for a in ANGLES if a != arc_ang]:
                 lf_rel = rel_f - offs[arc_ang] + offs[ang]
-                for f in range(lf_rel - int(0.8 * FPS), lf_rel + 1):
+                for f in range(lf_rel - int(0.8 * FPS), lf_rel + int(0.25 * FPS)):
                     bb = ball[ang].get(f)
                     if not bb:
                         continue
@@ -202,7 +234,8 @@ def main() -> int:
                             continue
                         topx, topy = (box[0] + box[2]) / 2, box[1]
                         d = np.hypot(bx - topx, by - topy) / bw
-                        score[(pl, ang)] += np.exp(-d)
+                        w = 1.0 if (atk is None or team_of(pl) == atk) else 0.25
+                        score[(pl, ang)] += w * np.exp(-d)
                 if score:                # arc cam produced evidence — use it
                     break
             if not score:
@@ -230,9 +263,10 @@ def main() -> int:
                 ref_f = arrive_f - offs[arc_ang]
                 rel_f = release_frame(arc_ang, arrive_f, apex_f)
                 s = None
+                atk = att_team(t0_chunk + ref_f / FPS) if pos_segs else None
                 if rel_f is not None:
                     for nudge in (0, 4, 8):     # if ball too low (gather), a
-                        s = attribute(arc_ang, rel_f + nudge)   # beat later it
+                        s = attribute(arc_ang, rel_f + nudge, atk)  # beat later it
                         if s:                   # is at the shooter's hands
                             break
                 pl, att_ang = (s[1], s[2]) if s else (None, None)

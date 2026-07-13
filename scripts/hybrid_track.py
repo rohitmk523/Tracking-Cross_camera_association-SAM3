@@ -48,6 +48,8 @@ def main() -> int:
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--min-conf", type=float, default=0.7, help="jersey read confidence to claim")
     ap.add_argument("--iou-claim", type=float, default=0.35)
+    ap.add_argument("--dual-numbers", default="",
+                    help="comma list; these numbers claim per (number,kit) -> separate nNB/nNW streams")
     a = ap.parse_args()
 
     from uball_cc.detection.base import Detection
@@ -56,11 +58,20 @@ def main() -> int:
     key = f"{a.game}_{a.tag}"
     adoc = json.loads((REPO / f"runs/anchors/{key}.jersey_anchors.json").read_text())
     offs = OFFS.get(key) or adoc["offsets"]
-    reads = defaultdict(list)                       # (cam, clip_frame) -> [(number, box, conf)]
+    duals = {int(x) for x in a.dual_numbers.split(",") if x.strip()}
+    reads = defaultdict(list)                       # (cam, clip_frame) -> [(key, box, conf)]
     for ev in adoc["anchors"]:
         if ev.get("conf", 0) >= a.min_conf:
             cf = ev["frame"] + offs[ev["cam"]]
-            reads[(ev["cam"], cf)].append((int(ev["number"]), ev["box"], ev["conf"]))
+            num = int(ev["number"])
+            if num in duals:
+                kit = ev.get("kit")
+                if kit not in ("B", "W"):
+                    continue            # untagged read cannot claim a dual (rare: tags ~100%)
+                key = f"{num}{kit}"     # SEPARATE stream per (number, kit)
+            else:
+                key = str(num)
+            reads[(ev["cam"], cf)].append((key, ev["box"], ev["conf"]))
 
     outd = REPO / a.out_dir
     outd.mkdir(parents=True, exist_ok=True)
