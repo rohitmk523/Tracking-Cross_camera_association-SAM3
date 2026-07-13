@@ -105,3 +105,10 @@ when a step lands; 13e1ffad stays sealed for the final validation.
   re-scoring it adds nothing. Rebound-WHO's lever = identity-stream quality
   in paint scrums (a tracking problem, not a scorer problem). Flag kept
   default-off.
+- 2026-07-14 R1-LITE (single-crop KPR veto at release) REFUTED: e6 63->56,
+  c2a 34->32, 2c4 58->53. WHY: the true shooter's release crop is the most
+  blurred/distorted in the scene — single-crop self-consistency favors crisp
+  bystanders, veto fires backwards. Does NOT kill R1-FULL (tracklet-level
+  split/merge averages many crops; literature +4-10 HOTA). R1-full needs
+  frame-sampling infra (~1 crop/2s per stream per cam from S3) — next
+  session's build. SAM2 stays last per user directive.

@@ -71,6 +71,24 @@ def main() -> int:
     V = torch.cat(vises)
 
     from torchreid.metrics.distance import compute_distance_matrix_using_bp_features
+    # R1-lite: self-consistency of candidate crops vs their OWN stream protos
+    ci = [i for i, s in enumerate(samples) if s["kind"] == "cand"]
+    gi0 = [i for i, s in enumerate(samples) if s["kind"] == "proto"]
+    if ci:
+        D = compute_distance_matrix_using_bp_features(
+            E[ci], E[gi0], V[ci], V[gi0], use_gpu=False)[0].numpy()
+        gal = [samples[i]["label"] for i in gi0]
+        out = {}
+        for row, i in enumerate(ci):
+            stream, shot_t = samples[i]["label"].split("|")
+            ds = [float(d) for d, gl in zip(D[row], gal) if gl == stream]
+            oth = [float(d) for d, gl in zip(D[row], gal) if gl != stream]
+            out.setdefault(shot_t, {})[stream] = {
+                "self": min(ds) if ds else None,
+                "other": min(oth) if oth else None}
+        import json as _j
+        (IN / "cand_scores.json").write_text(_j.dumps(out))
+        print(f"cand self-consistency -> {IN}/cand_scores.json ({len(ci)} crops)")
     qi = [i for i, s in enumerate(samples) if s["kind"] == "query"]
     gi = [i for i, s in enumerate(samples) if s["kind"] == "proto"]
     D = compute_distance_matrix_using_bp_features(

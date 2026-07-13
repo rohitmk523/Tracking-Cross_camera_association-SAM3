@@ -34,6 +34,7 @@ def main() -> int:
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--game", default="e6fba750")
+    ap.add_argument("--candidates", action="store_true")
     a = ap.parse_args()
     game = a.game
     led = json.loads((REPO / f"runs/tracking/ledger/shots_{game}_full.json").read_text())
@@ -135,6 +136,19 @@ def main() -> int:
                 continue                       # ball on/near him — ambiguous
             if crop_sample(mid, box, "proto", pl):
                 proto_count[pl] += 1
+
+        # R1-lite: emit EVERY candidate stream's crop at release, labeled
+        # stream|shot-idx — stage B scores each crop against its OWN stream
+        # prototypes (identity-switch detection at the decision point)
+        if a.candidates and bxy is not None:
+            for pl in tr:
+                box = tr[pl].get(ang, {}).get(rel)
+                if box is None:
+                    continue
+                bw = max(box[2] - box[0], 1.0)
+                if not (box[0] - bw <= bxy[0] <= box[2] + bw) or bxy[1] > box[3]:
+                    continue
+                crop_sample(mid, box, "cand", f"{pl}|{g['t']}")
 
         # QUERY: track-absent at release (no candidate under ball)
         num = name_num.get(g["a"].split()[-1])
