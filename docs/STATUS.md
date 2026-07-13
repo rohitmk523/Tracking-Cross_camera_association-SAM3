@@ -1,5 +1,5 @@
 # Cross-Camera Basketball Tracking — Status Report
-**Last updated: 2026-07-13** (Part 9 — the blind second game — is the newest section.)
+**Last updated: 2026-07-14** (Part 9 WHO round 1 — the three-game scoreboard — is the newest section.)
 
 **What the system does:** from the four cameras already installed in the gym, work out
 **who** is on court (team + jersey number), **where** each player is (top-down court
