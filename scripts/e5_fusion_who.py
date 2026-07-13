@@ -22,9 +22,8 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parents[1]
 ANGLES = ("FL", "FR", "NL", "NR")
-OFFS = {"FL": 0, "FR": -11, "NL": -1, "NR": -1}
+from game_meta import GAME_OFFS, GAME_CHUNKS
 FPS = 29.97
-CHUNKS = ("0_600", "600_600", "1200_600", "1800_600", "2400_600", "3000_345")
 
 
 def load_chunk(game, tag):
@@ -38,7 +37,8 @@ def load_chunk(game, tag):
             if f not in ball[a] or s > ball[a][f][1]:
                 ball[a][f] = ([float(v) for v in b], float(s))
     tr = defaultdict(dict)
-    for p in (REPO / f"runs/events_fg_{tag}").glob(f"{game}_{tag}__n*__*.json"):
+    tdir = REPO / (f"runs/events_fg_{tag}" if game == "e6fba750" else f"runs/events_fg_{game[:3]}_{tag}")
+    for p in tdir.glob(f"{game}_{tag}__n*__*.json"):
         parts = p.stem.split("__")
         pl, a = "#" + parts[1][1:], parts[2]
         d = json.loads(p.read_text())["frames"]
@@ -70,8 +70,11 @@ def holder_scores(ball, tr, ang, f0, f1):
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--e3-log", default=None)
+    ap.add_argument("--game", default="e6fba750")
+    ap.add_argument("--clips-dir", default="runs/e1_frames")
     a = ap.parse_args()
-    game = "e6fba750"
+    game = a.game
+    OFFS = GAME_OFFS[game]
     led = json.loads((REPO / f"runs/tracking/ledger/shots_{game}_full.json").read_text())
     plays = json.loads((REPO / f"data/plays/{game}_full.json").read_text())["plays"]
     gt = [p for p in plays if ("MAKE" in p["cls"] or "MISS" in p["cls"])]
@@ -79,7 +82,7 @@ def main() -> int:
     name_num = {}
     for pr in roster["players"]:
         name_num.setdefault(pr["name"].split()[-1], pr["num"])
-    data = {tag: load_chunk(game, tag) for tag in CHUNKS}
+    data = {tag: load_chunk(game, tag) for tag in GAME_CHUNKS[game]}
 
     # E3 picks in GT order of track-absent queries (stage A ordering == gt order)
     e3_picks = []
@@ -87,6 +90,12 @@ def main() -> int:
         for m in re.finditer(r"query gt=#\s*(\d+) -> pick #?(\d+)", Path(a.e3_log).read_text()):
             e3_picks.append((m.group(1), m.group(2)))
     e3_iter = iter(e3_picks)
+
+    import sys
+    sys.path.insert(0, str(REPO / "src"))
+    from uball_cc.fusion.homography import load_calib, project_pixels
+    calib = {aa: load_calib(str(REPO / f"configs/calib/{aa}.json")) for aa in ANGLES}
+    zcfg = json.loads((REPO / "configs/court_zones_court-a.json").read_text())
 
     from rtmlib import RTMPose
     pose = RTMPose(
@@ -124,7 +133,9 @@ def main() -> int:
         e2_ok = e2_pick in gt_ids if e2_pick else base_ok
 
         # E1 wrist confident-override on the release clip
-        clip = REPO / f"runs/e1_frames/{o['chunk']}_{rel}_{ang}.mp4"
+        clip = REPO / f"{a.clips_dir}/{game}_{o['chunk']}_{rel}_{ang}.mp4"
+        if not clip.exists():
+            clip = REPO / f"{a.clips_dir}/{o['chunk']}_{rel}_{ang}.mp4"
         wr_pick = None
         wr_d = 9.9
         track_absent = True
@@ -173,8 +184,34 @@ def main() -> int:
                 e3_ok = (pick == str(num)) if gtn == str(num) else None
             except StopIteration:
                 pass
+
+        # fused-feet court distance of a picked identity (for zone pass-2)
+        def pick_dist(pl):
+            if pl is None:
+                return None
+            ds = []
+            for back in (0, 6, 12):
+                pts = []
+                for aa in ANGLES:
+                    lf = rel - OFFS[ang] + OFFS[aa] - back
+                    for df in (0, -1, 1, -2, 2):
+                        box = tr[pl].get(aa, {}).get(lf + df)
+                        if box is not None:
+                            (x, y), = project_pixels(
+                                [((box[0] + box[2]) / 2, box[3])], calib[aa])
+                            pts.append([x, y])
+                            break
+                if pts:
+                    pos = np.median(np.stack(pts), axis=0)
+                    ds.append(min(
+                        np.linalg.norm(pos - np.array(zcfg["baskets"]["L"])),
+                        np.linalg.norm(pos - np.array(zcfg["baskets"]["R"]))))
+            return float(max(ds)) if ds else None
+
         rows.append({"t": g["t"], "cls": g["cls"], "dist": o.get("release_dist_cm"),
-                     "base": base_ok, "e2": e2_ok, "wr": wr_ok, "e3": e3_ok})
+                     "base": base_ok, "e2": e2_ok, "wr": wr_ok, "e3": e3_ok,
+                     "e2_dist": pick_dist(e2_pick),
+                     "wr_dist": pick_dist(wr_pick if (wr_pick and wr_d < 0.6) else None)})
 
     def fuse(r, d_close):
         if r["e3"] is not None:

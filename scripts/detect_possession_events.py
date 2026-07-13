@@ -28,9 +28,9 @@ import numpy as np
 REPO = Path(__file__).resolve().parents[1]
 
 ANGLES = ("FL", "FR", "NL", "NR")
-OFFS = {"e6fba750": {"FL": 0, "FR": -11, "NL": -1, "NR": -1}}
+from game_meta import GAME_OFFS as OFFS, GAME_CHUNKS
 FPS = 29.97
-CHUNKS = ("0_600", "600_600", "1200_600", "1800_600", "2400_600", "3000_345")
+
 POSSESS_EXPAND = 1.35
 HYSTERESIS = 8
 REBOUND_WINDOW = (0.2, 5.0)
@@ -66,7 +66,9 @@ def possession_chunk(game, tag, offs):
             if f not in ball[ang] or s > ball[ang][f][1]:
                 ball[ang][f] = ([float(v) for v in b], float(s))
     tracks = defaultdict(dict)
-    for p in (REPO / f"runs/events_fg_{tag}").glob(f"{game}_{tag}__n*__*.json"):
+    tdir = REPO / (f"runs/events_fg_{tag}" if game == "e6fba750"
+                   else f"runs/events_fg_{game[:3]}_{tag}")
+    for p in tdir.glob(f"{game}_{tag}__n*__*.json"):
         parts = p.stem.split("__")
         pl, ang = "#" + parts[1][1:], parts[2]
         d = json.loads(p.read_text())["frames"]
@@ -131,7 +133,7 @@ def main() -> int:
         segs = json.loads(pos_path.read_text())["segments"]
     else:
         glob = {}
-        for tag in CHUNKS:
+        for tag in GAME_CHUNKS[a.game]:
             t0 = float(tag.split("_")[0])
             pc = possession_chunk(a.game, tag, offs)
             for f, pl in pc.items():

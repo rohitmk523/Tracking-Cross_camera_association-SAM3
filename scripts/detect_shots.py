@@ -33,9 +33,9 @@ sys.path.insert(0, str(REPO / "src"))
 
 ANGLES = ("FL", "FR", "NL", "NR")
 FAR = ("FL", "FR")                      # far cams see the hoop + whole arc
-OFFS = {"e6fba750": {"FL": 0, "FR": -11, "NL": -1, "NR": -1}}
+from game_meta import GAME_OFFS as OFFS, GAME_CHUNKS
 FPS = 29.97
-CHUNKS = ("0_600", "600_600", "1200_600", "1800_600", "2400_600", "3000_345")
+
 
 
 def load_ballhoop(game, tag):
@@ -130,7 +130,7 @@ def main() -> int:
 
     # ---- per chunk: detect arcs + attribute, emit global-time events ----
     out = []
-    for tag in CHUNKS:
+    for tag in GAME_CHUNKS[a.game]:
         t0_chunk = float(tag.split("_")[0])
         ball, hoop = load_ballhoop(a.game, tag)
         if not any(ball[ang] for ang in FAR):

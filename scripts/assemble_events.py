@@ -33,6 +33,9 @@ def main() -> int:
     ap.add_argument("--game", default="e6fba750")
     ap.add_argument("--plays", default="data/plays/e6fba750_full.json")
     ap.add_argument("--match-tol", type=float, default=1.5)
+    ap.add_argument("--p3-eval", default="runs/shotdet_ab/eval_ours_arcwin_wide.json")
+    ap.add_argument("--arc-windows", default="runs/shotdet_ab/arc_windows.json")
+    ap.add_argument("--gt-windows", default="runs/shotdet_ab/gt_windows.json")
     a = ap.parse_args()
 
     arcs = json.loads((REPO / f"runs/tracking/ledger/shots_{a.game}_full.json").read_text())
@@ -45,19 +48,17 @@ def main() -> int:
     # 0.9818 vs 0.9648 on GT windows). arc_windows.json maps pid -> the arc
     # event whose window produced the verdict (arc_t = start_timestamp + 2.5).
     p3, arc_t_of = {}, {}
-    p3_path = REPO / "runs/shotdet_ab/eval_ours_arcwin_wide.json"
-    if not p3_path.exists():
-        p3_path = REPO / "runs/shotdet_ab/eval_ours.json"
+    p3_path = REPO / a.p3_eval
     if p3_path.exists():
         for r in json.loads(p3_path.read_text()):
             p3[r["play_id"]] = r
-    aw_path = REPO / "runs/shotdet_ab/arc_windows.json"
+    aw_path = REPO / a.arc_windows
     if aw_path.exists():
         aw = json.loads(aw_path.read_text())["games"]
         uuid_aw = next(g for g in aw if g.startswith(a.game))
         arc_t_of = {s["play_id"]: float(s["start_timestamp"]) + 2.5
                     for s in aw[uuid_aw]}
-    gtw = json.loads((REPO / "runs/shotdet_ab/gt_windows.json").read_text())["games"]
+    gtw = json.loads((REPO / a.gt_windows).read_text())["games"]
     uuid = next(g for g in gtw if g.startswith(a.game))
     pid_t = {s["play_id"]: float(s["start_timestamp"]) for s in gtw[uuid]
              if s.get("start_timestamp") is not None}
@@ -65,8 +66,6 @@ def main() -> int:
     # ---- assemble CV events ----
     events = []
     for o in arcs:
-        if not o.get("pred_player"):
-            continue
         d = o.get("release_dist_cm")
         # FT: release from the line band; production isolation check lives in
         # detect_shots' fused positions — approximated here by the band alone
@@ -85,9 +84,11 @@ def main() -> int:
         base = "FREE_THROW" if is_ft else (o["pred_zone"] or "FG")
         base = {"2PT": "FG"}.get(base, base)
         cls = f"{base}_{verdict}" if verdict else f"{base}_ATTEMPT"
+        if not o.get("pred_player") and verdict is None:
+            continue                     # shot-ness gate: no evidence
         events.append({
             "t": o["t"], "classification": cls,
-            "player_a": o["pred_player"].rstrip("?"),
+            "player_a": (o["pred_player"] or "?").rstrip("?"),
             "zone": o["pred_zone"], "release_dist_cm": d,
             "source": "cv", "confidence": 0.8 if verdict else 0.5,
         })
