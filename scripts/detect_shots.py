@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Self-contained shot detection + shooter attribution (events v2).
+"""Self-contained shot detection + shooter attribution (events v2), full game.
 
 No triangulation (side-angle depth is unreliable — shot-det team's verdict). Uses
 OUR ball+hoop specialist cache (far cams see the hoop ~100%). Per far camera:
@@ -12,11 +12,11 @@ OUR ball+hoop specialist cache (far cams see the hoop ~100%). Per far camera:
   3. POINTS: the shooter's feet -> court zone (2/3/4PT), reused from detect_events.
 
 Validated against the plays GT (which plays are shots; classification=make/miss;
-player_a=shooter). Make/miss itself is scored vs GT here; production verdict later
-= the shot-det trained rim model.
+player_a=shooter). Make/miss production verdict = frozen P3 via our adapter
+(scripts/shotdet_p1_adapter.py + shotdet_transfer_eval.py: 0.952 on e6).
 
-  python scripts/detect_shots.py --game e6fba750 --tag 44_60 \
-      --tracks-dir runs/events_fg_0_600 --plays data/plays/e6fba750_44_60.json
+  python scripts/detect_shots.py --game e6fba750 \
+      --plays data/plays/e6fba750_full.json --tracks-glob "runs/events_fg_{tag}"
 """
 from __future__ import annotations
 
@@ -35,9 +35,11 @@ ANGLES = ("FL", "FR", "NL", "NR")
 FAR = ("FL", "FR")                      # far cams see the hoop + whole arc
 OFFS = {"e6fba750": {"FL": 0, "FR": -11, "NL": -1, "NR": -1}}
 FPS = 29.97
+CHUNKS = ("0_600", "600_600", "1200_600", "1800_600", "2400_600", "3000_345")
 
 
 def load_ballhoop(game, tag):
+    """Per-chunk ball dict {ang: {frame: (box, score)}} + static hoop median."""
     ball = {ang: {} for ang in ANGLES}
     hoop = {}
     for ang in ANGLES:
@@ -52,7 +54,6 @@ def load_ballhoop(game, tag):
                 hoops.append(b)
             else:
                 f = int(f)
-                cy = (b[1] + b[3]) / 2
                 if f not in ball[ang] or s > ball[ang][f][1]:
                     ball[ang][f] = ([float(v) for v in b], float(s))
         if hoops:
@@ -60,41 +61,47 @@ def load_ballhoop(game, tag):
     return ball, hoop
 
 
-def find_shots(ball_ang, rim, min_rise=70, near_rim_px=110):
-    """Ball-arc apexes near the rim. Returns [(apex_frame, apex_xy)]."""
+def find_shots(ball_ang, rim, arrive_px=100, min_above_px=60):
+    """RIM-ARRIVAL events: the ball descends into the rim vicinity after
+    having been clearly above it (an arc terminating at this rim). Catches
+    long 3PT/4PT arcs whose APEX is far above the rim (the old apex-near-rim
+    gate only ever saw short close-range arcs). Returns [(arrive_f, apex_f)]:
+    arrival frame + the arc's highest point in the prior ~1.5s."""
     if rim is None or not ball_ang:
         return []
     rx, ry = (rim[0] + rim[2]) / 2, (rim[1] + rim[3]) / 2
     fs = sorted(ball_ang)
     cy = {f: (ball_ang[f][0][1] + ball_ang[f][0][3]) / 2 for f in fs}
     cx = {f: (ball_ang[f][0][0] + ball_ang[f][0][2]) / 2 for f in fs}
-    shots, i = [], 0
-    while i < len(fs):
-        f = fs[i]
-        # candidate apex: local min of cy (highest point), near rim x/y
-        win = [g for g in fs if abs(g - f) <= 8]
-        if (cy[f] == min(cy[g] for g in win) and abs(cx[f] - rx) < near_rim_px
-                and abs(cy[f] - ry) < near_rim_px):
-            # require a real rise before (ball came up) — arc, not a bounce
-            before = [g for g in fs if f - 20 <= g < f]
-            if before and max(cy[g] for g in before) - cy[f] >= min_rise:
-                if not shots or f - shots[-1][0] > 15:      # dedup within 0.5s
-                    shots.append((f, (cx[f], cy[f])))
-        i += 1
+    shots = []
+    for i, f in enumerate(fs):
+        if np.hypot(cx[f] - rx, cy[f] - ry) > arrive_px:
+            continue
+        # descending into the rim: previous seen position was higher (smaller cy)
+        prev = [g for g in fs[max(0, i - 5):i] if f - 6 <= g < f]
+        if not prev or cy[prev[-1]] >= cy[f]:
+            continue
+        # the ball was clearly ABOVE the rim in the prior ~1.5s (a real arc)
+        before = [g for g in fs if f - 45 <= g < f]
+        if not before:
+            continue
+        apex_f = min(before, key=lambda g: cy[g])
+        if (ry - cy[apex_f]) < min_above_px:
+            continue
+        if not shots or f - shots[-1][0] > 30:              # dedup within 1s
+            shots.append((f, apex_f))
     return shots
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--game", default="e6fba750")
-    ap.add_argument("--tag", default="44_60")
-    ap.add_argument("--tracks-dir", required=True)
-    ap.add_argument("--plays", required=True)
-    ap.add_argument("--dets-dir", default="runs/dets_cache")
-    ap.add_argument("--release-lead", type=float, default=0.5, help="s before apex = release")
+    ap.add_argument("--plays", default="data/plays/e6fba750_full.json")
+    ap.add_argument("--tracks-glob", default="runs/events_fg_{tag}")
+    ap.add_argument("--release-lead", type=float, default=0.5)
+    ap.add_argument("--match-tol", type=float, default=1.5, help="s, GT match window")
     a = ap.parse_args()
     from uball_cc.fusion.homography import load_calib, project_pixels
-    key = f"{a.game}_{a.tag}"
     offs = OFFS[a.game]
     zones = json.loads((REPO / "configs/court_zones_court-a.json").read_text())
     roster = json.loads((REPO / f"data/rosters/{a.game}.json").read_text())
@@ -110,98 +117,173 @@ def main() -> int:
         c = by_num.get(n, [])
         return c[0]["name"] if len(c) == 1 else (c[0]["name"] + "?" if c else pl)
 
-    ball, hoop = load_ballhoop(a.game, a.tag)
-    tracks = defaultdict(dict)
-    for p in (REPO / a.tracks_dir).glob(f"{key}__n*__*.json"):
-        parts = p.stem.split("__")
-        pl, ang = "#" + parts[1][1:], parts[2]
-        d = json.loads(p.read_text())["frames"]
-        tracks[pl][ang] = {int(f): r["box"] for f, r in d.items() if r.get("present")}
-    players = sorted(tracks)
-
     def court(ang, box):
         (x, y), = project_pixels([((box[0] + box[2]) / 2, box[3])], calib[ang])
         return np.array([x, y])
 
-    # ---- detect shots per far camera ----
-    shots = []                              # (ref_frame, ang, apex_xy)
-    for ang in FAR:
-        for af, axy in find_shots(ball[ang], hoop.get(ang)):
-            shots.append((af - offs[ang], ang, af, axy))
-    shots.sort()
-    print(f"detected {len(shots)} shot-arc events across far cams")
-
-    # ---- attribute each detected shot ----
-    def shooter_at(ref_f, ang, apex_f):
-        """Shooter = player whose raised hands (top of box) are nearest the ball,
-        scanned across the release window [apex-0.8s .. apex-0.1s]. At release the
-        ball is at the top of the shooter, so we score proximity to his TOP-center
-        and require the ball to sit near his upper body (not a defender's mid-body)."""
-        lo = apex_f - int(0.8 * FPS)
-        hi = apex_f - int(0.1 * FPS)
-        best = None
-        for cand in range(lo, hi + 1):
-            bb = ball[ang].get(cand)
-            if not bb:
-                continue
-            bx = (bb[0][0] + bb[0][2]) / 2
-            by = (bb[0][1] + bb[0][3]) / 2
-            for pl in players:
-                box = tracks[pl].get(ang, {}).get(cand)
-                if box is None:
-                    continue
-                bw = box[2] - box[0]
-                topx, topy = (box[0] + box[2]) / 2, box[1]
-                # ball must be within ~1 box-width horizontally and near the top
-                # third of the player (hands), i.e. not far below his head
-                if abs(bx - topx) > bw and not (box[0] <= bx <= box[2]):
-                    continue
-                if by > box[1] + 0.55 * (box[3] - box[1]):    # ball below mid-body: skip
-                    continue
-                d = np.hypot(bx - topx, by - topy)
-                if best is None or d < best[0]:
-                    best = (d, pl, cand)
-        return best
-
+    # ---- per chunk: detect arcs + attribute, emit global-time events ----
     out = []
-    for ref_f, ang, apex_f, apex_xy in shots:
-        s = shooter_at(ref_f, ang, apex_f)
-        pl = s[1] if s else None
-        zone = None
-        if pl:
-            # feet-zone at release
-            box = tracks[pl].get(ang, {}).get(s[2])
-            if box is not None:
-                pos = court(ang, box)
-                dL = np.linalg.norm(pos - np.array(zones["baskets"]["L"]))
-                dR = np.linalg.norm(pos - np.array(zones["baskets"]["R"]))
-                side = "L" if dL < dR else "R"
-                d = min(dL, dR)
-                zone = ("2PT" if d < zones["three_pt_r_cm"]
-                        else "3PT" if d < zones["four_pt_r_cm"][side] else "4PT")
-        out.append({"t": round(ref_f / FPS + clip_t0, 1), "cam": ang,
-                    "pred_player": name_of(pl) if pl else None, "pred_zone": zone})
+    for tag in CHUNKS:
+        t0_chunk = float(tag.split("_")[0])
+        ball, hoop = load_ballhoop(a.game, tag)
+        if not any(ball[ang] for ang in FAR):
+            print(f"  [{tag}] no ball cache — skipped")
+            continue
+        key = f"{a.game}_{tag}"
+        tracks = defaultdict(dict)
+        tdir = REPO / a.tracks_glob.format(tag=tag)
+        for p in tdir.glob(f"{key}__n*__*.json"):
+            parts = p.stem.split("__")
+            pl, ang = "#" + parts[1][1:], parts[2]
+            d = json.loads(p.read_text())["frames"]
+            tracks[pl][ang] = {int(f): r["box"] for f, r in d.items() if r.get("present")}
+        players = sorted(tracks)
+
+        def release_frame(ang, arrive_f, apex_f):
+            """Walk BACK from the apex along the final monotone ascent; the
+            walk stops where the rise began — the catch/set point, which is at
+            the SHOOTER. (Taking the globally lowest ball in a window instead
+            latches onto the incoming PASS at the passer's chest — measured:
+            FG WHO 21%.)"""
+            lo = apex_f - int(0.9 * FPS)        # flight release->apex < 0.9s
+            fs = sorted(f for f in ball[ang] if lo <= f <= apex_f)
+            if not fs:
+                return None
+            cy = {f: (ball[ang][f][0][1] + ball[ang][f][0][3]) / 2 for f in fs}
+            rel = fs[-1]
+            for f in reversed(fs[:-1]):
+                if rel - f > 8:                 # detection gap too big — stop
+                    break
+                if cy[f] >= cy[rel] - 3.0:      # ball was lower (or flat) before
+                    rel = f
+                else:
+                    break                       # rise ends: earlier ball higher
+            return rel
+
+        def attribute(arc_ang, rel_f):
+            """WHO = the identity that HELD the ball leading into the release,
+            not whoever's hands are at the ball at the release instant (a
+            contesting defender reaches the ball exactly then — measured: FG
+            37% / 3PT 44% with single-frame attribution). Integrate ball
+            proximity on the arc cam over [rel-0.8s, rel]: the shooter
+            accumulates over the dribble/set; the contester gets one beat."""
+            score = defaultdict(float)
+            for ang in [arc_ang] + [a for a in ANGLES if a != arc_ang]:
+                lf_rel = rel_f - offs[arc_ang] + offs[ang]
+                for f in range(lf_rel - int(0.8 * FPS), lf_rel + 1):
+                    bb = ball[ang].get(f)
+                    if not bb:
+                        continue
+                    bx = (bb[0][0] + bb[0][2]) / 2
+                    by = (bb[0][1] + bb[0][3]) / 2
+                    for pl in players:
+                        box = tracks[pl].get(ang, {}).get(f)
+                        if box is None:
+                            continue
+                        bw = max(box[2] - box[0], 1.0)
+                        if not (box[0] - 0.6 * bw <= bx <= box[2] + 0.6 * bw):
+                            continue
+                        if by > box[3]:                  # ball below his feet
+                            continue
+                        topx, topy = (box[0] + box[2]) / 2, box[1]
+                        d = np.hypot(bx - topx, by - topy) / bw
+                        score[(pl, ang)] += np.exp(-d)
+                if score:                # arc cam produced evidence — use it
+                    break
+            if not score:
+                return None
+            (pl, ang), _ = max(score.items(), key=lambda kv: kv[1])
+            return (0.0, pl, ang)
+
+        def fused_feet(pl, arc_ang, rel_f):
+            """Shooter court position = median over ALL cams tracking him at
+            release (near cams project feet accurately; far cams at range do
+            not — measured zone acc 94% near vs 39% far)."""
+            pts = []
+            for ang in ANGLES:
+                lf = rel_f - offs[arc_ang] + offs[ang]
+                for df in (0, -1, 1, -2, 2):
+                    box = tracks[pl].get(ang, {}).get(lf + df)
+                    if box is not None:
+                        pts.append(court(ang, box))
+                        break
+            return np.median(np.stack(pts), axis=0) if pts else None
+
+        n_chunk = 0
+        for arc_ang in FAR:
+            for arrive_f, apex_f in find_shots(ball[arc_ang], hoop.get(arc_ang)):
+                ref_f = arrive_f - offs[arc_ang]
+                rel_f = release_frame(arc_ang, arrive_f, apex_f)
+                s = None
+                if rel_f is not None:
+                    for nudge in (0, 4, 8):     # if ball too low (gather), a
+                        s = attribute(arc_ang, rel_f + nudge)   # beat later it
+                        if s:                   # is at the shooter's hands
+                            break
+                pl, att_ang = (s[1], s[2]) if s else (None, None)
+                zone, dist = None, None
+                if pl:
+                    # farthest fused position across the set/release beats — a
+                    # shooter drifts INWARD after release, never outward
+                    ds = []
+                    for back in (0, 6, 12):
+                        pos = fused_feet(pl, arc_ang, rel_f - back)
+                        if pos is None:
+                            continue
+                        dL = np.linalg.norm(pos - np.array(zones["baskets"]["L"]))
+                        dR = np.linalg.norm(pos - np.array(zones["baskets"]["R"]))
+                        ds.append(min(dL, dR))
+                    if ds:
+                        dist = float(max(ds))
+                        rb = zones.get("release_zone_b_cm")
+                        if rb:      # empirically calibrated release boundaries
+                            zone = ("2PT" if dist < rb[0]
+                                    else "3PT" if dist < rb[1] else "4PT")
+                        else:       # geometric court-line radii (compress at range)
+                            side = "L" if dL < dR else "R"
+                            zone = ("2PT" if dist < zones["three_pt_r_cm"]
+                                    else "3PT" if dist < zones["four_pt_r_cm"][side]
+                                    else "4PT")
+                out.append({"t": round(t0_chunk + ref_f / FPS + clip_t0, 1),
+                            "cam": arc_ang, "att_cam": att_ang, "chunk": tag,
+                            "pred_player": name_of(pl) if pl else None,
+                            "pred_zone": zone,
+                            "release_dist_cm": round(dist, 1) if dist else None})
+                n_chunk += 1
+        print(f"  [{tag}] {n_chunk} arc events")
+    out.sort(key=lambda o: o["t"])
+    print(f"detected {len(out)} shot-arc events across far cams (full game)")
 
     # ---- score vs GT shots ----
     gt_shots = [p for p in plays_doc["plays"] if any(k in p["cls"] for k in ("MAKE", "MISS"))]
     matched = who_ok = zone_ok = 0
-    print(f"\n{'GT t':>7} {'GT class':<12} {'GT player':<20} | {'det?':>4} {'pred player':<20} {'zone':<5}")
+    ft_like = 0
+    print(f"\n{'GT t':>7} {'GT class':<16} {'GT player':<20} | {'det?':>4} {'pred player':<20} {'zone':<5}")
     for g in gt_shots:
-        cand = [o for o in out if abs(o["t"] - g["t"]) <= 1.5]
-        gtz = ("4PT" if g["cls"].startswith("4PT") else "3PT" if g["cls"].startswith("3PT") else "2PT")
+        cand = [o for o in out if abs(o["t"] - g["t"]) <= a.match_tol]
+        gtz = ("4PT" if g["cls"].startswith("4PT") else "3PT" if g["cls"].startswith("3PT")
+               else "2PT")
         if cand:
             matched += 1
             o = min(cand, key=lambda o: abs(o["t"] - g["t"]))
-            wok = (o["pred_player"] and o["pred_player"].rstrip("?").split()[-1] == g["a"].split()[-1])
+            wok = (o["pred_player"] and g["a"]
+                   and o["pred_player"].rstrip("?").split()[-1] == g["a"].split()[-1])
             zok = (o["pred_zone"] == gtz)
             who_ok += bool(wok); zone_ok += bool(zok)
-            print(f"{g['t']:7.1f} {g['cls']:<12} {g['a'][:20]:<20} | {'YES':>4} "
+            flag = "WHO OK" if wok else ""
+            print(f"{g['t']:7.1f} {g['cls']:<16} {str(g['a'])[:20]:<20} | {'YES':>4} "
                   f"{str(o['pred_player'])[:20]:<20} {str(o['pred_zone']):<5} "
-                  f"{'WHO OK' if wok else ''} {'ZONE OK' if zok else ''}")
+                  f"{flag} {'ZONE OK' if zok else ''}")
         else:
-            print(f"{g['t']:7.1f} {g['cls']:<12} {g['a'][:20]:<20} | {'--':>4} (shot not detected)")
-    print(f"\nSHOT RECALL: {matched}/{len(gt_shots)} | WHO: {who_ok}/{matched} | ZONE: {zone_ok}/{matched}")
-    (REPO / f"runs/tracking/ledger/shots_{key}.json").write_text(json.dumps(out, indent=1))
+            ft_like += "FREE_THROW" in g["cls"]
+            print(f"{g['t']:7.1f} {g['cls']:<16} {str(g['a'])[:20]:<20} | {'--':>4} (not detected)")
+    print(f"\nSHOT RECALL: {matched}/{len(gt_shots)} "
+          f"({ft_like} of the misses are free throws) | "
+          f"WHO: {who_ok}/{matched} ({who_ok/max(matched,1):.0%}) | "
+          f"ZONE: {zone_ok}/{matched} ({zone_ok/max(matched,1):.0%})")
+    led = REPO / "runs/tracking/ledger"
+    led.mkdir(parents=True, exist_ok=True)
+    (led / f"shots_{a.game}_full.json").write_text(json.dumps(out, indent=1))
     return 0
 
 

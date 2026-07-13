@@ -16,5 +16,10 @@
    713.2
   ]
  },
- "rule": "shot points from shooter's feet at release: d<670.6 -> 2PT; 670.6<=d<four_pt -> 3PT; d>=four_pt -> 4PT (d = distance to ATTACKED basket)"
+ "rule": "shot points from shooter's feet at release: d<670.6 -> 2PT; 670.6<=d<four_pt -> 3PT; d>=four_pt -> 4PT (d = distance to ATTACKED basket)",
+ "release_zone_b_cm": [
+  710,
+  840
+ ],
+ "release_zone_note": "empirical release-instant boundaries fit on e6 first-half confirmed shots (geometric radii compress at range: measured 4PT median 855 vs line 940)"
 }
