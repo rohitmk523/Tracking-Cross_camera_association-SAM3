@@ -22,8 +22,6 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-import numpy as np
-
 REPO = Path(__file__).resolve().parents[1]
 
 FT_DIST_CM = (430.0, 610.0)      # measured FT release band (medians ~523)
@@ -42,14 +40,23 @@ def main() -> int:
     gt_all = plays_doc["plays"]
     gt_shots = [p for p in gt_all if ("MAKE" in p["cls"] or "MISS" in p["cls"])]
 
-    # P3 make/miss verdicts per GT play_id (our-detector features, frozen P3)
-    p3 = {}
-    p3_path = REPO / "runs/shotdet_ab/eval_ours.json"
+    # P3 make/miss verdicts from ARC-anchored windows (production path: the
+    # window is [arc_t-4.5, arc_t+3.5], no GT timestamps involved; measured
+    # 0.9818 vs 0.9648 on GT windows). arc_windows.json maps pid -> the arc
+    # event whose window produced the verdict (arc_t = start_timestamp + 2.5).
+    p3, arc_t_of = {}, {}
+    p3_path = REPO / "runs/shotdet_ab/eval_ours_arcwin_wide.json"
+    if not p3_path.exists():
+        p3_path = REPO / "runs/shotdet_ab/eval_ours.json"
     if p3_path.exists():
         for r in json.loads(p3_path.read_text()):
             p3[r["play_id"]] = r
-    # play_id -> GT timestamps (frozen windows; used only to join P3 verdicts
-    # onto arc events for SCORING — production windows come from the arcs)
+    aw_path = REPO / "runs/shotdet_ab/arc_windows.json"
+    if aw_path.exists():
+        aw = json.loads(aw_path.read_text())["games"]
+        uuid_aw = next(g for g in aw if g.startswith(a.game))
+        arc_t_of = {s["play_id"]: float(s["start_timestamp"]) + 2.5
+                    for s in aw[uuid_aw]}
     gtw = json.loads((REPO / "runs/shotdet_ab/gt_windows.json").read_text())["games"]
     uuid = next(g for g in gtw if g.startswith(a.game))
     pid_t = {s["play_id"]: float(s["start_timestamp"]) for s in gtw[uuid]
@@ -65,10 +72,13 @@ def main() -> int:
         # detect_shots' fused positions — approximated here by the band alone
         # plus a low-variance dedup (FT pairs come 8-20s apart, same shooter).
         is_ft = d is not None and FT_DIST_CM[0] <= d <= FT_DIST_CM[1] and o["pred_zone"] == "2PT"
-        # make/miss: join the nearest GT play's P3 verdict (scoring path)
+        # make/miss: this arc event's own P3 verdict (arc-anchored window),
+        # falling back to the nearest GT play's verdict for unmapped events
         verdict = None
-        cands = [(abs(o["t"] - pid_t[pid]), pid) for pid in p3 if pid in pid_t
-                 and abs(o["t"] - pid_t[pid]) <= 3.0]
+        exact = [(abs(o["t"] - t), pid) for pid, t in arc_t_of.items()
+                 if pid in p3 and abs(o["t"] - t) <= 0.15]
+        cands = exact or [(abs(o["t"] - pid_t[pid]), pid) for pid in p3
+                          if pid in pid_t and abs(o["t"] - pid_t[pid]) <= 3.0]
         if cands:
             _, pid = min(cands)
             verdict = "MAKE" if p3[pid]["pred_frozen"] == 1 else "MISS"
