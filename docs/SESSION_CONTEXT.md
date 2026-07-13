@@ -85,11 +85,19 @@ rebound WHO 34% — same root). Diagnosed: 8/12 errors have the right track
 present (2D ambiguity), 4/12 track absent. Ideas: jersey-anchor confidence at
 release, cross-far-cam agreement, KPR emb check on the release crop.
 
-**NEXT:** (1) event demo reel v2 (adapt render_event_demo.py to events_v2 +
-possession_events ledgers); (2) paint-WHO iteration; (3) production noise
-gate for the 83 unmatched CV events (P3-prob shot-ness filter) + netmotion
-port for NEW games (their extract_netmotion.py reads P1-schema parquet);
-(4) c2a blind second game.
+**NEXT (user-ordered 2026-07-13, sequence is BINDING):**
+1. **docs/PAINT_WHO_PLAN.md is the plan** — solve crowd/paint WHO properly:
+   E0 oracle ceilings -> E1 wrist attribution (RTMPose) -> E2 cross-cam vote
+   -> E3 KPR release-crop identity -> E4 pass-vs-hold -> E5 fusion (split-half
+   fit). Fixed harness: 142-shot + 54-rebound WHO, per-class, no 4PT/FT
+   regression.
+2. THEN metric tuning: zone pass-2 refit, FT isolation check, shot-ness gate
+   for the 83 unmatched CV events; reel v3 + STATUS update.
+3. THEN **c2a fully blind** — all thresholds frozen from e6, c2a GT touched
+   exactly once for scoring. NOT BEFORE (user directive).
+(Reel v2 DELIVERED: runs/event_demo/event_demo_v2_e6fba750.mp4. STATUS.md
+Part 8 carries the dated v2.1 results. Netmotion port for new games stays on
+the backlog.)
 
 # ══ SESSION 2026-07-12 — EVENTS WORKSTREAM + BALL/HOOP + KPR CYCLE 2 ══
 (read this block first; older blocks below are still valid history)

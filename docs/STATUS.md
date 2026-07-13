@@ -344,6 +344,64 @@ rather than re-deriving possession frame-by-frame. Turnover/steal/block rules ar
 further layer. A visual GT-vs-prediction reel accompanies this report
 (`event_demo.mp4`).
 
+## Part 8 — Events v2 (2026-07-13): shot-anchored events, measured full game
+
+Everything in Part 7 was re-architected around a **shot trigger** instead of
+frame-by-frame possession, and the make/miss brain of the proven shot-detection
+system was transplanted onto our detector. All numbers below are the full e6
+game against the operator's log (142 make/miss plays; 54 rebounds), all logic
+CV-side — no ground-truth timestamps anywhere in the production path.
+
+| Metric (of the 142 GT shots) | v1 (Part 7) | **v2.1 (2026-07-13)** |
+|---|---|---|
+| Shot detected at all | n/a (GT-triggered) | **94%** (134/142) |
+| WHO — correct shooter | 49% | **62%** |
+| Point value (2/3/4PT or FT) | 62% | **78%** |
+| Make-or-miss | external | **98%** (131/134) |
+| Complete event fully correct | 44%* | **56%** (75/134) |
+| REBOUND detected / right rebounder | — | **81% / 34%** |
+
+*v1's 44% assumed the event exists (scored at GT timestamps) and had no
+make/miss; v2's 56% is on a strictly harder task — find the shot, name the
+shooter, read the zone AND call make/miss, all correct at once.
+
+What made each jump, in one line each:
+- **Make/miss 98%:** our new ball+hoop detector's tracks, run through the
+  shot-detection system's own feature+model recipe — validated to transfer
+  cleanly (honest leave-this-game-out protocol scores 0.958, identical to that
+  system's own benchmark; windows anchored on OUR detected arcs score even
+  better than the human-annotated windows, 0.982).
+- **Detection 94%:** two triggers — a rim-arrival arc detector, plus a rim-box
+  ENTRY cue for flat layups/putbacks (every one of the 25 missed close shots
+  had the ball *detected* in the rim box; the old arc gate just rejected flat
+  trajectories). Note for the record: the shot-detection system itself has no
+  shot trigger — it consumes human-annotated windows; the trigger is our net-new
+  logic.
+- **WHO 62%:** shooter = who *held* the ball into the release instant (walk
+  back from the arc apex to the set point), not who is nearest the ball — the
+  nearest-body rule picks contesting defenders and pass receivers.
+- **Zone 78%:** release-instant distance with boundaries calibrated once from
+  court geometry as measured *through the cameras* (the raw court-line radii
+  compress at long range; the fit is per-venue, held-out validated).
+- **REBOUND (new):** first sustained possession beginning after a missed shot,
+  longest-hold-wins; team of rebounder vs shooter gives offensive/defensive.
+
+A new 12-play reel accompanies this (`event_demo_v2_e6fba750.mp4`): each play
+shows the pipeline's full call — player, points, make/miss CALL — against the
+operator's log, including one deliberate wrong-shooter case and one wrong-zone
+case so the 62%/78% are visible, not hidden.
+
+**The one problem now worth real effort — crowd/paint attribution.** It caps
+shooter-WHO on close shots (36%), rebounder-WHO (34%), and therefore the
+complete-event number. Diagnosis is written: in two-thirds of the errors the
+right player's track exists at the right moment (a logic problem, solvable);
+in one-third the track itself is absent in the scrum (a tracking problem).
+This gets a dedicated, properly-planned effort next — signals not yet used:
+wrist keypoints from the pose stack, cross-camera release agreement,
+appearance embeddings on the release crop, and possession chain-back. Only
+after that lands do we tune the remaining metrics, and only then do we run the
+second game (c2a) as a fully blind generalization test.
+
 ## Appendix A — How a player is tracked, start to finish
 
 1. **Detect** every player, every frame, every camera (solved, 96–100%).
