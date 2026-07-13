@@ -6,6 +6,59 @@ in-flight jobs, and traps already paid for.
 
 ---
 
+# ══ SESSION 2026-07-13 — EVENTS V2 BUILT: transfer PASSED, WHO 65%, assembler live ══
+
+**MAKE/MISS SOLVED at zero GPU cost.** Their manifest is 20 games/3,161 shots
+(NOT "185"); full re-extraction would be $25-30 — NOT needed:
+- scripts/shotdet_p1_adapter.py: our ball_cache npz -> their P1 tracks schema
+  (conf floor 0.25 parity). scripts/shotdet_transfer_eval.py: their P2 +
+  geometry g_* (recomputed) + net-motion nm_* (joined by play_id — video-ROI
+  features, detector-independent) -> frozen p3_model_angleaware.joblib
+  (sklearn PINNED 1.7.1; thr=0.310 recovered; my env reproduces their saved
+  test preds BIT-EXACTLY).
+- CRITICAL trap: S3 `dual-fusion-v2/tracks/` = OLD v1-far-detector tracks
+  (frozen P3 on them: 0.746!). The real v8far source = `dual-fusion-v2-v16far2/
+  tracks/` (reproduces their features 0/280 mismatch). gt_windows.json (sha-
+  verified) = frozen windows incl e6 (142 shots, e6 was in their TRAIN split).
+- RESULT same-105-plays A/B: OURS 0.9524 (frozen AND leave-e6-out retrain) vs
+  their-features honest LOGO 0.9333 (their recorded OOF 0.9577 full 142).
+  Our detector's features transfer CLEANLY. Artifacts: runs/shotdet_ab/.
+
+**detect_shots.py v2 (full-game, measured on covered 0-2400s):** RECALL 81/~105
+covered, WHO 53/81=65% (v1 possession baseline 49%), ZONE 77% (held-out 74%).
+The journey (each step measured): apex-near-rim trigger only saw short arcs ->
+RIM-ARRIVAL trigger; global-lowest release latched onto PASSES (FG WHO 21%) ->
+monotone walk-back to the set point (cap 0.9s, catches dribble-floor edge via
++4/+8 nudge retry); single-frame attribution picks contesting DEFENDERS ->
+integrated ball-holder score over [rel-0.8s, rel] on arc cam; zone: geometric
+radii COMPRESS at range (4PT zone 8%! measured 4PT release median 855cm vs
+line fit 940) -> empirical release boundaries b23=710/b34=840 fit on first
+half, held-out second half 74% (configs/court_zones_court-a.json
+release_zone_b_cm). FG-paint WHO 37% diagnosed: 8/12 errors crowd-ambiguity
+(track present), 4/12 track absent -> backlog, not attribution logic.
+
+**scripts/assemble_events.py (events v2 assembler):** CV-triggered plays-style
+events {t, classification, player_a, source:"cv"} -> runs/tracking/ledger/
+events_v2_e6fba750.json (NOT pushed to Supabase — user reviews first).
+Covered-range score vs GT: detected 81, WHO 65%, zone/FT 75%, make-miss 91%
+among verdict-joined (74% raw — 15 boundary plays lack P3 verdicts until
+top-up), ALL-CORRECT 48%. 158 events emitted, 38 unmatched (putbacks/tips —
+rebound layer's input).
+
+**IN FLIGHT: e6 cache TOP-UP** i-07928fadf67e95bff (chunks 2400_600+3000_345,
+launched 09:37 IST, ~$1.4; first rebuild i-02ea94ff7d2a90636 hit its 9000s
+failsafe after 4/6 chunks — budget ~30min/chunk + 12min setup). Watcher
+blryun3ah (strict terminated-gate) auto-fetches. THEN RERUN: shotdet_p1_adapter
+(142 plays) -> shotdet_transfer_eval --label ours_full -> detect_shots ->
+assemble_events = full-game numbers.
+
+**NEXT after that:** (1) production windows A/B (windows from OUR arc times vs
+GT windows — P3 verdict agreement); (2) possession-timeline export from
+detect_events -> REBOUND/STEAL/TURNOVER layer (consumes the 38 unmatched
+events); (3) net-motion port for new games (their extract_netmotion.py reads
+P1-schema parquet — our adapter output is drop-in); (4) FG-paint WHO backlog;
+(5) event demo reel v2.
+
 # ══ SESSION 2026-07-12 — EVENTS WORKSTREAM + BALL/HOOP + KPR CYCLE 2 ══
 (read this block first; older blocks below are still valid history)
 
