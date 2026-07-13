@@ -19,6 +19,10 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from collections import defaultdict
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+from game_meta import GAME_CHUNKS
 
 REPO = Path(__file__).resolve().parents[1]
 W, H = 1600, 900
@@ -70,6 +74,29 @@ def main() -> int:
     if pos.exists():
         ev = ev + json.loads(pos.read_text())["events"]
     ev.sort(key=lambda e: e["t"])
+    # identity tracks for the rendered angle: predicted-player boxing
+    roster = json.loads((REPO / f"data/rosters/{a.game}.json").read_text())
+    by_num = defaultdict(list)
+    for pr in roster["players"]:
+        by_num[pr["num"]].append(pr)
+    def stream_of(name):
+        recs = [p for p in roster["players"] if p["name"] == name]
+        if not recs:
+            return None
+        r = recs[0]
+        dual = len(by_num[r["num"]]) > 1
+        return f"n{r['num']}" + (("B" if r["team"] == 1 else "W") if dual else "")
+    tracks = {}
+    for tag in GAME_CHUNKS[a.game]:
+        t0c = float(tag.split("_")[0])
+        tdir = REPO / (f"runs/events_fg_{tag}" if a.game == "e6fba750"
+                       else f"runs/events_fg_{a.game[:3]}_{tag}")
+        for p in tdir.glob(f"{a.game}_{tag}__n*__{a.angle}.json"):
+            sid = p.stem.split("__")[1]
+            d = json.loads(p.read_text())["frames"]
+            tracks.setdefault(sid, {}).update(
+                {round(t0c * FPS) + int(fr): r["box"]
+                 for fr, r in d.items() if r.get("present")})
     gt = [{"t": p["t"] + a.gt_shift, "classification": p["cls"], "player_a": p["a"]}
           for p in plays]
 
@@ -108,6 +135,22 @@ def main() -> int:
         vid = cv2.resize(frame, (vw_w, int(vw_w * frame.shape[0] / frame.shape[1])))
         y0 = (H - vid.shape[0]) // 2
         canvas[y0:y0 + vid.shape[0], PANEL:PANEL + vw_w] = vid
+        # box the predicted player around each firing CV event
+        for e in ev:
+            if not (e["t"] - 0.8 <= t_now <= e["t"] + 3.0) or not e.get("player_a"):
+                continue
+            sid = stream_of(e["player_a"])
+            box = tracks.get(sid, {}).get(round(t_now * FPS)) if sid else None
+            if box is None:
+                continue
+            fh, fw = frame.shape[:2]
+            sx = vw_w / fw
+            sy = vid.shape[0] / fh
+            x1, y1 = PANEL + int(box[0] * sx), y0 + int(box[1] * sy)
+            x2, y2 = PANEL + int(box[2] * sx), y0 + int(box[3] * sy)
+            cv2.rectangle(canvas, (x1, y1), (x2, y2), (90, 230, 255), 3)
+            cv2.putText(canvas, e["player_a"].split()[-1], (x1, max(20, y1 - 8)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (90, 230, 255), 2)
         cv_feed = [e for e in ev if a.t0 - 1 <= e["t"] <= t_now]
         gt_feed = [e for e in gt if a.t0 - 1 <= e["t"] <= t_now]
         draw_feed(canvas, 0, "PIPELINE (ours)", cv_feed, t_now, (60, 180, 230))
