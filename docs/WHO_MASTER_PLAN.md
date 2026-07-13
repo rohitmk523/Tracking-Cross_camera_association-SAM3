@@ -95,3 +95,8 @@ when a step lands; 13e1ffad stays sealed for the final validation.
   all games: pick-vs-ceiling gap is now the whole problem (crowd ambiguity
   + c2a release instants). Next candidates: rq-aware cross-cam attribution
   (attribute on the cam with best rq per arc, not fixed arc cam), W4 rebounds.
+- 2026-07-14 rq-aware cam ORDERING refuted: all three games down
+  (c2a 40->34, e6 69->63, 2c4 63->58) — the instantaneously cleanest view is
+  often a bystander's; the arc cam watches the actual launch. Reverted.
+  c2a's arc-vs-any-cam ceiling gap needs a different key (identity-aware,
+  not geometry-aware, cam selection).
