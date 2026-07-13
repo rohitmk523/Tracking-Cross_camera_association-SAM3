@@ -62,12 +62,34 @@ complete. NO AWS jobs in flight.
   Detection gap = FG layups/putbacks (flat arcs, min_above_px gate). 218 CV
   events, 61 unmatched-to-shot-GT (putback/tip attempts) await the rebound layer.
 
-**NEXT:** (1) possession-timeline export from detect_events -> REBOUND/STEAL/
-TURNOVER layer (consumes the 61 unmatched events); (2) FG recall (flat-arc
-trigger variant) + FG-paint WHO backlog (8/12 crowd-ambiguity, 4/12 track
-absent); (3) event demo reel v2; (4) net-motion port for NEW games (their
-extract_netmotion.py reads P1-schema parquet — our adapter output is drop-in;
-e6 reused their nm by play_id); (5) c2a as blind second game when desired.
+**PART B + FG FIX (same day, later):**
+- **REBOUND layer live** (scripts/detect_possession_events.py): possession
+  timeline (detect_events core, ball CLASS 0 ONLY — corrected caches carry
+  hoop rows that fake rim possession) -> RLE segments cached
+  (ledger/possession_e6fba750.json). Rebounder = LONGEST hold BEGINNING in
+  post-miss window (sticky possession keeps the SHOOTER through flight —
+  overlap-pick scored 3/43). **REBOUND det 81% (44/54), WHO 34%.**
+  TURNOVER/STEAL experimental only (team possession flips ~200x vs 4+1 GT).
+- **FG SOLVED (detection): rim-box ENTRY trigger** — all 25 missed FGs had
+  the ball DETECTED in the rim box; flat layups never rise 60px above rim so
+  the arc gate rejected them. FG det 25/50 -> **47/50**.
+- **FUSION-RECALL TRUTH (user asked):** their system has NO shot trigger —
+  extract_tracks consumes human-annotated plays windows (load_gt_shots).
+  Their "~100% recall" is annotation recall. Our trigger is net-new logic.
+- **FULL GAME FINAL v2.1: DETECTED 134/142 (94%) | WHO 62% | zone/FT 78% |
+  MAKE-MISS 98% (P3 arc-windows 0.9776) | ALL-CORRECT 75/134 (56%).**
+  Per class det: 3PT 20/22 · 4PT 33/36 · FG 47/50 · FT 34/34.
+
+**THE one open quality problem: crowd/paint attribution** (FG WHO 36%,
+rebound WHO 34% — same root). Diagnosed: 8/12 errors have the right track
+present (2D ambiguity), 4/12 track absent. Ideas: jersey-anchor confidence at
+release, cross-far-cam agreement, KPR emb check on the release crop.
+
+**NEXT:** (1) event demo reel v2 (adapt render_event_demo.py to events_v2 +
+possession_events ledgers); (2) paint-WHO iteration; (3) production noise
+gate for the 83 unmatched CV events (P3-prob shot-ness filter) + netmotion
+port for NEW games (their extract_netmotion.py reads P1-schema parquet);
+(4) c2a blind second game.
 
 # ══ SESSION 2026-07-12 — EVENTS WORKSTREAM + BALL/HOOP + KPR CYCLE 2 ══
 (read this block first; older blocks below are still valid history)
