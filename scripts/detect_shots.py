@@ -263,6 +263,23 @@ def main() -> int:
                 ref_f = arrive_f - offs[arc_ang]
                 rel_f = release_frame(arc_ang, arrive_f, apex_f)
                 s = None
+                rq = None
+                if rel_f is not None:
+                    for fq in range(rel_f - 6, rel_f + 7):
+                        bb = ball[arc_ang].get(fq)
+                        if not bb:
+                            continue
+                        bx = (bb[0][0] + bb[0][2]) / 2
+                        by = (bb[0][1] + bb[0][3]) / 2
+                        for pl in players:
+                            box = tracks[pl].get(arc_ang, {}).get(fq)
+                            if box is None or by > box[3]:
+                                continue
+                            if by > box[1] + 0.6 * (box[3] - box[1]):
+                                continue
+                            d = abs(bx - (box[0] + box[2]) / 2) / max(box[2] - box[0], 1.0)
+                            if rq is None or d < rq:
+                                rq = d
                 atk = att_team(t0_chunk + ref_f / FPS) if pos_segs else None
                 if rel_f is not None:
                     for nudge in (0, 4, 8):     # if ball too low (gather), a
@@ -299,6 +316,7 @@ def main() -> int:
                             "rel_f": int(rel_f) if rel_f is not None else None,
                             "pred_player": name_of(pl) if pl else None,
                             "pred_zone": zone,
+                            "rq": round(rq, 3) if rq is not None else None,
                             "release_dist_cm": round(dist, 1) if dist else None})
                 n_chunk += 1
         print(f"  [{tag}] {n_chunk} arc events")
@@ -316,7 +334,8 @@ def main() -> int:
                else "2PT")
         if cand:
             matched += 1
-            o = min(cand, key=lambda o: abs(o["t"] - g["t"]))
+            o = min(cand, key=lambda o: (o.get("rq") is None,
+                                         o.get("rq", 9.9), abs(o["t"] - g["t"])))
             wok = (o["pred_player"] and g["a"]
                    and o["pred_player"].rstrip("?").split()[-1] == g["a"].split()[-1])
             zok = (o["pred_zone"] == gtz)
