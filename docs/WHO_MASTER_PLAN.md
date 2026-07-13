@@ -71,3 +71,18 @@ timeline gets cleaner automatically as identity streams stabilize).
 5. W4 rebounds — inherits everything.
 Re-run the three-game scoreboard after each step; update STATUS Part 9 table
 when a step lands; 13e1ffad stays sealed for the final validation.
+
+
+---
+## W-log (living)
+- 2026-07-14 W1 round 1 ADOPTED: kit-birth streams, widened window,
+  rq-matching -> e6 69/87, 2c4 63/75, c2a 40/70 (WHO/zone). Refuted with
+  numbers: anchor sparsity, possession team-prior (52%), 3 snap variants.
+- 2026-07-14 W2 VERDICT: fusion OBSOLETE post-round-1. Fresh signal rows:
+  e6 fused 66% == baseline 66% (round-1 absorbed the old +7); c2a fused 25%
+  vs baseline 37% (harmful). No refit performed — nothing left to fit.
+  Production picker = baseline + rq-matching. Wrist/vote signals archived
+  (scripts kept; may matter again after W3 changes the candidate pool).
+- NEXT = W3: track-absent recovery via raw detector boxes at release + KPR/
+  jersey naming (e6 14% / c2a 21% of shots have no track — the ceiling gap),
+  which also partially covers c2a's chain release-instant losses.
