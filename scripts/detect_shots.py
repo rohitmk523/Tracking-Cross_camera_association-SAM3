@@ -119,10 +119,18 @@ def main() -> int:
     for pr in roster["players"]:
         by_num[pr["num"]].append(pr)
 
+    kit_team = {"B": 1, "W": 2}          # roster: team1_color Black, team2 White
     def name_of(pl):
         n = int("".join(c for c in pl if c.isdigit()))
         c = by_num.get(n, [])
-        return c[0]["name"] if len(c) == 1 else (c[0]["name"] + "?" if c else pl)
+        if len(c) == 1:
+            return c[0]["name"]
+        kt = kit_team.get(pl[-1]) if pl and pl[-1] in ("B", "W") else None
+        if kt is not None:
+            m = [p for p in c if p["team"] == kt]
+            if len(m) == 1:
+                return m[0]["name"]
+        return (c[0]["name"] + "?" if c else pl)
 
     def court(ang, box):
         (x, y), = project_pixels([((box[0] + box[2]) / 2, box[3])], calib[ang])

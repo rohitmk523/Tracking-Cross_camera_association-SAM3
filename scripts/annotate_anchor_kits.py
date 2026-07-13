@@ -35,6 +35,9 @@ def main() -> int:
     ap.add_argument("--game", required=True)
     ap.add_argument("--tag", required=True)
     ap.add_argument("--dual-numbers", required=True, help="roster numbers worn by both teams")
+    ap.add_argument("--by-hue", action="store_true",
+                    help="cluster on torso HUE (colored kits, e.g. blue vs green); "
+                         "kit letter = W for the brighter cluster's mean V, B for darker")
     a = ap.parse_args()
     key = f"{a.game}_{a.tag}"
     dual = {int(x) for x in a.dual_numbers.split(",") if x}
@@ -45,6 +48,40 @@ def main() -> int:
     # FAST PATH (Phase 1): the anchor extractor already stored pose-guided torso
     # shades inline -> no video decode, no pose matching; clustering only.
     dual_evs = [(i, ev) for i, ev in enumerate(doc["anchors"]) if int(ev["number"]) in dual]
+    if a.by_hue:
+        hued = [(i, ev) for i, ev in dual_evs if "hue" in ev]
+        if not dual_evs or len(hued) < 0.8 * len(dual_evs):
+            print("by-hue: not enough hue-tagged events; re-extract anchors first")
+            return 1
+        n_tagged = 0
+        for num in sorted(dual):
+            rows = [(i, float(ev["hue"]), float(ev.get("shade", 0)))
+                    for i, ev in hued if int(ev["number"]) == num]
+            if len(rows) < 60:
+                print(f"#{num}: too few hue reads ({len(rows)}) — left untagged")
+                continue
+            hs = np.sort(np.array([h for _, h, _ in rows]))
+            c0, c1 = hs.min(), hs.max()
+            for _ in range(30):
+                assign = np.abs(hs - c0) < np.abs(hs - c1)
+                c0, c1 = hs[assign].mean(), hs[~assign].mean()
+            lo, hi = min(c0, c1), max(c0, c1)
+            if hi - lo < 20:
+                print(f"#{num}: hue clusters not opposed ({lo:.0f},{hi:.0f}) — left untagged")
+                continue
+            thr = float((lo + hi) / 2)
+            # kit letter by mean brightness of each hue cluster (W brighter)
+            v_lo = np.mean([v for _, h, v in rows if h < thr])
+            v_hi = np.mean([v for _, h, v in rows if h >= thr])
+            kit_lo, kit_hi = ("W", "B") if v_lo >= v_hi else ("B", "W")
+            for i, h, _v in rows:
+                doc["anchors"][i]["kit"] = kit_lo if h < thr else kit_hi
+                n_tagged += 1
+            print(f"#{num}: HUE split at {thr:.0f} (clusters {lo:.0f}/{hi:.0f}), "
+                  f"h<thr->{kit_lo} (V {v_lo:.0f}) vs {kit_hi} (V {v_hi:.0f}), tagged")
+        ap_path.write_text(json.dumps(doc))
+        print(f"tagged {n_tagged} events -> {ap_path}")
+        return 0
     shaded = [(i, ev) for i, ev in dual_evs if "shade" in ev]
     if dual_evs and len(shaded) >= 0.8 * len(dual_evs):
         raw = [(i, int(ev["number"]), ev["cam"], float(ev["shade"])) for i, ev in shaded]

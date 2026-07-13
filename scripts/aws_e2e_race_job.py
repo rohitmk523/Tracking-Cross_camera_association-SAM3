@@ -46,8 +46,12 @@ done
 [ -z "$PYBIN" ] && PYBIN=/usr/bin/python3
 TV=$($PYBIN -c "import torch;print(torch.__version__.split('+')[0])")
 $PYBIN -m pip install -q "torch==$TV" rfdetr ultralytics supervision trackers \\
-  opencv-python-headless timm pytorch-lightning nltk rtmlib onnxruntime-gpu 2>&1 | tail -1
+  opencv-python-headless timm pytorch-lightning nltk rtmlib "onnxruntime-gpu==1.20.1" 2>&1 | tail -1
 $PYBIN -m pip uninstall -q -y torchaudio 2>/dev/null || true
+# onnxruntime-gpu needs torch's bundled CUDA libs on the loader path
+NVLIB=$($PYBIN -c "import os, glob, torch; b=os.path.dirname(os.path.dirname(torch.__file__)); print(':'.join(sorted(glob.glob(os.path.join(b,'nvidia','*','lib')))))")
+export LD_LIBRARY_PATH="$NVLIB:$LD_LIBRARY_PATH"
+$PYBIN -c "import onnxruntime as ort; print('ort providers:', ort.get_available_providers())"
 which ffmpeg || (apt-get update -qq && apt-get install -y -qq ffmpeg)
 mkdir -p /work && cd /work
 curl -s -L "{bundle_url}" -o b.tgz && tar xzf b.tgz

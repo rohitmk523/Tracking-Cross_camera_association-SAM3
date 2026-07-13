@@ -72,6 +72,8 @@ def main() -> int:
     ap.add_argument("--e3-log", default=None)
     ap.add_argument("--game", default="e6fba750")
     ap.add_argument("--clips-dir", default="runs/e1_frames")
+    ap.add_argument("--d-close", type=float, default=None,
+                    help="freeze D_CLOSE (blind runs); omit to fit on first half")
     a = ap.parse_args()
     game = a.game
     OFFS = GAME_OFFS[game]
@@ -112,8 +114,19 @@ def main() -> int:
         ball, tr = data[o["chunk"]]
         ang, rel = o["cam"], o["rel_f"]
         num = name_num.get(g["a"].split()[-1])
-        gt_ids = {pl for pl in tr if pl.lstrip("#").rstrip("BW").isdigit()
-                  and int(pl.lstrip("#").rstrip("BW")) == num}
+        rec = next((p for p in roster["players"]
+                    if p["name"].split()[-1] == g["a"].split()[-1]), None)
+        dual = sum(1 for p in roster["players"] if p["num"] == num) > 1
+        want_kit = ("B" if rec["team"] == 1 else "W") if (rec and dual) else None
+        gt_ids = set()
+        for pl in tr:
+            core = pl.lstrip("#")
+            kit = core[-1] if core[-1] in ("B", "W") else None
+            digits = core.rstrip("BW")
+            if not digits.isdigit() or int(digits) != num:
+                continue
+            if want_kit is None or kit in (None, want_kit):
+                gt_ids.add(pl)
         if not gt_ids:
             continue
         base_ok = bool(o["pred_player"] and o["pred_player"].rstrip("?").split()[-1]
@@ -226,8 +239,12 @@ def main() -> int:
 
     fit = [r for r in rows if r["t"] < 1200]
     ev = [r for r in rows if r["t"] >= 1200]
-    best = max((sum(fuse(r, D) for r in fit), D) for D in (550, 650, 750))
-    D = best[1]
+    if a.d_close is not None:
+        D = a.d_close
+        best = (sum(fuse(r, D) for r in fit), D)
+    else:
+        best = max((sum(fuse(r, D) for r in fit), D) for D in (550, 650, 750))
+        D = best[1]
     n_ok = sum(fuse(r, D) for r in rows)
     ev_ok = sum(fuse(r, D) for r in ev)
     b_all = sum(r["base"] for r in rows)

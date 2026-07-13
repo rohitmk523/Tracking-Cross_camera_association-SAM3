@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from pathlib import Path
+import sys as _sys
 
 import cv2
 import numpy as np
@@ -24,12 +25,17 @@ REPO = Path(__file__).resolve().parents[1]
 ANGLES = ("FL", "FR", "NL", "NR")
 OFFS = {"FL": 0, "FR": -11, "NL": -1, "NR": -1}
 FPS = 29.97
-OUT = REPO / "runs/e3_kpr"
+import sys
+OUT = REPO / f"runs/e3_kpr_{sys.argv[sys.argv.index('--game')+1][:3] if '--game' in sys.argv else 'e6f'}"
 MAX_PROTO = 15
 
 
 def main() -> int:
-    game = "e6fba750"
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--game", default="e6fba750")
+    a = ap.parse_args()
+    game = a.game
     led = json.loads((REPO / f"runs/tracking/ledger/shots_{game}_full.json").read_text())
     plays = json.loads((REPO / f"data/plays/{game}_full.json").read_text())["plays"]
     gt = [p for p in plays if ("MAKE" in p["cls"] or "MISS" in p["cls"])]
@@ -57,11 +63,13 @@ def main() -> int:
                     if f not in b[a] or s > b[a][f][1]:
                         b[a][f] = ([float(v) for v in bx], float(s))
             t = defaultdict(dict)
-            for p in (REPO / f"runs/events_fg_{tag}").glob(f"{game}_{tag}__n*__*.json"):
+            tdir = REPO / (f"runs/events_fg_{tag}" if game == "e6fba750"
+                           else f"runs/events_fg_{game[:3]}_{tag}")
+            for p in tdir.glob(f"{game}_{tag}__n*__*.json"):
                 parts = p.stem.split("__")
-                pl, a = "#" + parts[1][1:], parts[2]
+                pl, a2 = "#" + parts[1][1:], parts[2]
                 d = json.loads(p.read_text())["frames"]
-                t[pl][a] = {int(f): r["box"] for f, r in d.items() if r.get("present")}
+                t[pl][a2] = {int(f): r["box"] for f, r in d.items() if r.get("present")}
             balls[tag], trks[tag] = b, t
         return balls[tag], trks[tag]
 
@@ -75,7 +83,9 @@ def main() -> int:
         if not cand:
             continue
         o = min(cand, key=lambda o: abs(o["t"] - g["t"]))
-        clip = REPO / f"runs/e1_frames/{o['chunk']}_{o['rel_f']}_{o['cam']}.mp4"
+        clip = REPO / f"runs/e1_frames/{game}_{o['chunk']}_{o['rel_f']}_{o['cam']}.mp4"
+        if not clip.exists():
+            clip = REPO / f"runs/e1_frames/{o['chunk']}_{o['rel_f']}_{o['cam']}.mp4"
         if not clip.exists():
             continue
         ball, tr = chunk_data(o["chunk"])

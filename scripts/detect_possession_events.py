@@ -122,10 +122,18 @@ def main() -> int:
     for pr in roster["players"]:
         by_num[pr["num"]].append(pr)
 
+    kit_team = {"B": 1, "W": 2}
     def rec_of(pl):
         num = int("".join(c for c in pl if c.isdigit()))
         c = by_num.get(num, [])
-        return c[0] if len(c) == 1 else (c[0] if c else None)
+        if len(c) == 1:
+            return c[0]
+        kt = kit_team.get(pl[-1]) if pl and pl[-1] in ("B", "W") else None
+        if kt is not None:
+            m = [p for p in c if p["team"] == kt]
+            if len(m) == 1:
+                return m[0]
+        return c[0] if c else None
 
     # ---- full-game possession timeline (global seconds), RLE segments ----
     pos_path = REPO / f"runs/tracking/ledger/possession_{a.game}.json"

@@ -22,7 +22,8 @@ REPO = Path(__file__).resolve().parents[1]
 KPR = Path("/tmp/kpr")
 sys.path.insert(0, str(KPR))
 sys.path.insert(0, str(REPO / "scripts"))
-IN = REPO / "runs/e3_kpr"
+import sys as _s
+IN = REPO / (_s.argv[_s.argv.index("--in-dir")+1] if "--in-dir" in _s.argv else "runs/e3_kpr")
 
 
 def main() -> int:
