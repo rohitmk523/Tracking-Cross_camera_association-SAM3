@@ -45,19 +45,29 @@ among verdict-joined (74% raw — 15 boundary plays lack P3 verdicts until
 top-up), ALL-CORRECT 48%. 158 events emitted, 38 unmatched (putbacks/tips —
 rebound layer's input).
 
-**IN FLIGHT: e6 cache TOP-UP** i-07928fadf67e95bff (chunks 2400_600+3000_345,
-launched 09:37 IST, ~$1.4; first rebuild i-02ea94ff7d2a90636 hit its 9000s
-failsafe after 4/6 chunks — budget ~30min/chunk + 12min setup). Watcher
-blryun3ah (strict terminated-gate) auto-fetches. THEN RERUN: shotdet_p1_adapter
-(142 plays) -> shotdet_transfer_eval --label ours_full -> detect_shots ->
-assemble_events = full-game numbers.
+**TOP-UP DONE (fetched, 24/24 npz)** — full-game corrected ball+hoop cache
+complete. NO AWS jobs in flight.
 
-**NEXT after that:** (1) production windows A/B (windows from OUR arc times vs
-GT windows — P3 verdict agreement); (2) possession-timeline export from
-detect_events -> REBOUND/STEAL/TURNOVER layer (consumes the 38 unmatched
-events); (3) net-motion port for new games (their extract_netmotion.py reads
-P1-schema parquet — our adapter output is drop-in); (4) FG-paint WHO backlog;
-(5) event demo reel v2.
+**FULL-GAME FINAL (e6, 142 GT make/miss plays):**
+- Make/miss GT-windows: frozen 0.9648 / honest leave-e6-out **0.9577 == their
+  recorded far_v16 honest benchmark exactly**.
+- **PRODUCTION windows validated**: P3 on arc-anchored windows [arc_t-4.5,
+  arc_t+3.5], zero GT timestamps: **0.9818** (beats GT windows — rim-centered
+  window is a cleaner shot container). CLOCK TRAP: plays JSON t = gt_windows
+  start_timestamp **+2.3s** (video-fitted vs DB clock) — join by sorted ORDER
+  (142/142 same-class), never by raw timestamp.
+- **Assembled events v2 vs GT: DETECTED 110/142 (77%) | of detected: WHO 65% |
+  zone/FT 75% | MAKE-MISS 98% | ALL-CORRECT 58%.** Per class n/det/who/zone/mm:
+  3PT 22/20/9/11/20 · 4PT 36/33/29/25/33 · FG 50/25/10/19/25 · FT 34/32/24/28/30.
+  Detection gap = FG layups/putbacks (flat arcs, min_above_px gate). 218 CV
+  events, 61 unmatched-to-shot-GT (putback/tip attempts) await the rebound layer.
+
+**NEXT:** (1) possession-timeline export from detect_events -> REBOUND/STEAL/
+TURNOVER layer (consumes the 61 unmatched events); (2) FG recall (flat-arc
+trigger variant) + FG-paint WHO backlog (8/12 crowd-ambiguity, 4/12 track
+absent); (3) event demo reel v2; (4) net-motion port for NEW games (their
+extract_netmotion.py reads P1-schema parquet — our adapter output is drop-in;
+e6 reused their nm by play_id); (5) c2a as blind second game when desired.
 
 # ══ SESSION 2026-07-12 — EVENTS WORKSTREAM + BALL/HOOP + KPR CYCLE 2 ══
 (read this block first; older blocks below are still valid history)
