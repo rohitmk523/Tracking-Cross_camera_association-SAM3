@@ -91,6 +91,8 @@ def main() -> int:
         pred_lines = [("PLAYER", (e["pred_player"] or "no read").rstrip("?"))]
         if e["gt_zone"]:
             pred_lines.append(("POINTS (from court zone)", pz))
+        if e.get("pred_cls"):
+            pred_lines.append(("CALL", e["pred_cls"].replace("_", " ")))
         who_mark = "OK" if e["who_ok"] else "MISS"
         who_col = (60, 200, 90) if e["who_ok"] else (60, 90, 230)
 
