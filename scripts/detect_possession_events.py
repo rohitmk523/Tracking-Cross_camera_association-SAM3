@@ -115,6 +115,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--game", default="e6fba750")
     ap.add_argument("--plays", default="data/plays/e6fba750_full.json")
+    ap.add_argument("--grab-attr", action="store_true",
+                    help="verify rebounder by under-ball evidence at the grab instant")
     a = ap.parse_args()
     offs = OFFS[a.game]
     roster = json.loads((REPO / f"data/rosters/{a.game}.json").read_text())
@@ -158,6 +160,29 @@ def main() -> int:
         pos_path.write_text(json.dumps({"fps": FPS, "segments": segs}))
     print(f"possession segments (>= {SUSTAIN_F}f): {len(segs)}")
 
+    _gd = {}
+    def grab_data(tag):
+        if tag not in _gd:
+            ballc = {ang: {} for ang in ANGLES}
+            for ang in ANGLES:
+                z = np.load(REPO / f"runs/ball_cache/{a.game}_{ang}_{tag}.ball.npz")
+                for b, s2, fr, c in zip(z["boxes"], z["scores"], z["frame_idx"], z["classes"]):
+                    if int(c) != 0:
+                        continue
+                    fr = int(fr)
+                    if fr not in ballc[ang] or s2 > ballc[ang][fr][1]:
+                        ballc[ang][fr] = ([float(v) for v in b], float(s2))
+            trc = defaultdict(dict)
+            tdir = REPO / (f"runs/events_fg_{tag}" if a.game == "e6fba750"
+                           else f"runs/events_fg_{a.game[:3]}_{tag}")
+            for p in tdir.glob(f"{a.game}_{tag}__n*__*.json"):
+                parts = p.stem.split("__")
+                d = json.loads(p.read_text())["frames"]
+                trc["#" + parts[1][1:]][parts[2]] = {int(fr): r["box"]
+                    for fr, r in d.items() if r.get("present")}
+            _gd[tag] = (ballc, trc)
+        return _gd[tag]
+
     ev = json.loads((REPO / f"runs/tracking/ledger/events_v2_{a.game}.json").read_text())["events"]
     shots = [e for e in ev if not e["classification"].endswith("_ATTEMPT")]
     misses = [e for e in ev if e["classification"].endswith("_MISS")]
@@ -178,7 +203,37 @@ def main() -> int:
         # first-touch WHO 30%, longest-hold 37% — remaining errors are the
         # crowd-possession signal itself, same root cause as FG-paint WHO)
         s = max(cand, key=lambda s: s[1] - s[0])
-        r = rec_of(s[2])
+        pick = s[2]
+        if a.grab_attr:
+            g0 = s[0]
+            tag = next((tg for tg in GAME_CHUNKS[a.game]
+                        if float(tg.split("_")[0]) * FPS <= g0
+                        < (float(tg.split("_")[0]) + float(tg.split("_")[1])) * FPS),
+                       None)
+            if tag is not None:
+                ballc, trc = grab_data(tag)
+                lf0 = g0 - round(float(tag.split("_")[0]) * FPS)
+                sc = {}
+                for ang in ANGLES:
+                    for fq in range(lf0 - 6 + offs[ang], lf0 + 18 + offs[ang]):
+                        bb = ballc[ang].get(fq)
+                        if not bb:
+                            continue
+                        bx = (bb[0][0] + bb[0][2]) / 2
+                        by = (bb[0][1] + bb[0][3]) / 2
+                        for pl, angs in trc.items():
+                            box = angs.get(ang, {}).get(fq)
+                            if box is None or by > box[3]:
+                                continue
+                            if by > box[1] + 0.6 * (box[3] - box[1]):
+                                continue
+                            d = np.hypot(bx - (box[0] + box[2]) / 2, by - box[1])                                 / max(box[2] - box[0], 1.0)
+                            sc[pl] = sc.get(pl, 0.0) + np.exp(-d)
+                if sc:
+                    bestp = max(sc, key=sc.get)
+                    if bestp != pick and sc[bestp] >= 1.5 * sc.get(pick, 1e-9):
+                        pick = bestp
+        r = rec_of(pick)
         sh_team = next((p["team"] for p in roster["players"]
                         if p["name"] == m.get("player_a")), None)
         kind = ("OFF" if r and sh_team and r["team"] == sh_team else

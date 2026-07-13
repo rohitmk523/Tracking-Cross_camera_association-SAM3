@@ -100,3 +100,8 @@ when a step lands; 13e1ffad stays sealed for the final validation.
   often a bystander's; the arc cam watches the actual launch. Reverted.
   c2a's arc-vs-any-cam ceiling gap needs a different key (identity-aware,
   not geometry-aware, cam selection).
+- 2026-07-14 W4 grab-instant attribution refuted: e6 rebounds 15->14,
+  c2a 20->20 — the grab-moment under-ball evidence IS the possession signal;
+  re-scoring it adds nothing. Rebound-WHO's lever = identity-stream quality
+  in paint scrums (a tracking problem, not a scorer problem). Flag kept
+  default-off.
