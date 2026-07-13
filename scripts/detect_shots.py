@@ -74,22 +74,29 @@ def find_shots(ball_ang, rim, arrive_px=100, min_above_px=60):
     cy = {f: (ball_ang[f][0][1] + ball_ang[f][0][3]) / 2 for f in fs}
     cx = {f: (ball_ang[f][0][0] + ball_ang[f][0][2]) / 2 for f in fs}
     shots = []
+    rw = max(rim[2] - rim[0], 20.0)
+    inside_prev = {f: abs(cx[f] - rx) < 0.9 * rw and abs(cy[f] - ry) < 0.9 * rw
+                   for f in fs}
     for i, f in enumerate(fs):
-        if np.hypot(cx[f] - rx, cy[f] - ry) > arrive_px:
-            continue
-        # descending into the rim: previous seen position was higher (smaller cy)
-        prev = [g for g in fs[max(0, i - 5):i] if f - 6 <= g < f]
-        if not prev or cy[prev[-1]] >= cy[f]:
-            continue
-        # the ball was clearly ABOVE the rim in the prior ~1.5s (a real arc)
-        before = [g for g in fs if f - 45 <= g < f]
-        if not before:
-            continue
-        apex_f = min(before, key=lambda g: cy[g])
-        if (ry - cy[apex_f]) < min_above_px:
-            continue
-        if not shots or f - shots[-1][0] > 30:              # dedup within 1s
-            shots.append((f, apex_f))
+        trigger = None
+        # (a) ARC ARRIVAL: descending into the rim vicinity after a clear rise
+        if np.hypot(cx[f] - rx, cy[f] - ry) <= arrive_px:
+            prev = [g for g in fs[max(0, i - 5):i] if f - 6 <= g < f]
+            before = [g for g in fs if f - 45 <= g < f]
+            if prev and cy[prev[-1]] < cy[f] and before:
+                apex_f = min(before, key=lambda g: cy[g])
+                if (ry - cy[apex_f]) >= min_above_px:
+                    trigger = (f, apex_f)
+        # (b) RIM-BOX ENTRY: flat layups/putbacks never rise 60px above the
+        # rim (measured: ALL 25 missed FGs had the ball IN the rim box) —
+        # the fusion repo's own make cue is this box interaction
+        if trigger is None and inside_prev[f]:
+            recent = [g for g in fs if f - 15 <= g < f]
+            if not any(inside_prev[g] for g in recent):
+                before = [g for g in fs if f - 45 <= g < f] or [f]
+                trigger = (f, min(before, key=lambda g: cy[g]))
+        if trigger and (not shots or trigger[0] - shots[-1][0] > 30):
+            shots.append(trigger)
     return shots
 
 
