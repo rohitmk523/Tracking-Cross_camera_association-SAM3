@@ -149,10 +149,33 @@ def main() -> int:
                     has_cand = True
                     break
         if bxy and not has_cand and num is not None:
-            bw_px = max(bb[0][2] - bb[0][0], 18.0)
-            px_h = bw_px * 8.0                 # person ~8 ball-widths tall
-            qbox = [bxy[0] - px_h * 0.22, bxy[1] - px_h * 0.15,
-                    bxy[0] + px_h * 0.22, bxy[1] + px_h * 0.85]
+            # W3: query = the DETECTOR box under the ball (real person boxes
+            # survive where identity tracks died), not a guessed geometry crop
+            qbox = None
+            dp = REPO / (f"runs/dets_cache/{game}_{ang}_{o['chunk']}"
+                         f"_small_1280_t0.25.dets.npz")
+            if dp.exists():
+                z = np.load(dp)
+                best = None
+                for b, s, c, fr in zip(z["boxes"], z["scores"], z["classes"],
+                                       z["frame_idx"]):
+                    if int(c) != 0 or int(fr) != rel or s < 0.4:
+                        continue
+                    if bxy[1] > b[3] or bxy[1] > b[1] + 0.6 * (b[3] - b[1]):
+                        continue
+                    bw = max(b[2] - b[0], 1.0)
+                    if not (b[0] - bw <= bxy[0] <= b[2] + bw):
+                        continue
+                    d = abs(bxy[0] - (b[0] + b[2]) / 2) / bw
+                    if best is None or d < best[0]:
+                        best = (d, [float(v) for v in b])
+                if best is not None:
+                    qbox = best[1]
+            if qbox is None:
+                bw_px = max(bb[0][2] - bb[0][0], 18.0)
+                px_h = bw_px * 8.0             # fallback: geometry crop
+                qbox = [bxy[0] - px_h * 0.22, bxy[1] - px_h * 0.15,
+                        bxy[0] + px_h * 0.22, bxy[1] + px_h * 0.85]
             if crop_sample(mid, qbox, "query", str(num)):
                 n_query += 1
 

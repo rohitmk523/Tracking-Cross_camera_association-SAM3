@@ -86,3 +86,12 @@ when a step lands; 13e1ffad stays sealed for the final validation.
 - NEXT = W3: track-absent recovery via raw detector boxes at release + KPR/
   jersey naming (e6 14% / c2a 21% of shots have no track — the ceiling gap),
   which also partially covers c2a's chain release-instant losses.
+- 2026-07-14 W3 VERDICT: NOT adopted. Round-1 tracking shrank track-absence
+  itself (e6 18->3, c2a 29->10, 2c4 8 shots); detector-box+KPR recovers 4/21
+  of the residue (~+1pt for real complexity). Ceiling gap self-closed.
+- 2026-07-14 fresh ceilings (oracle, any-cam): e6 85 / c2a 80 / 2c4 89.
+  Current (e5-harness basis): 66 / 37 / 62. THE remaining structure:
+  c2a arc-cam ceiling 66 vs any-cam 80 -> cross-cam presence unexploited;
+  all games: pick-vs-ceiling gap is now the whole problem (crowd ambiguity
+  + c2a release instants). Next candidates: rq-aware cross-cam attribution
+  (attribute on the cam with best rq per arc, not fixed arc cam), W4 rebounds.
