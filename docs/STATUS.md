@@ -448,6 +448,34 @@ The AGX line is the goal state: the same models, quantized and streaming,
 watching the game as it happens; the laptop and cloud paths are how we develop
 and verify against ground truth today.
 
+### Part 9 addendum — the dual-number ablation (third blind game, 2026-07-13 night)
+
+**Question:** is the weak shooter-naming on c2a a flaw in the attribution
+logic, or the fact that both teams wore the same numbers? **Method:** surveyed
+all remaining 4-angle-verified annotated games in the database for jersey
+overlap; picked the cleanest — game `2c490f1a` (2026-04-16, Gray vs Orange,
+18 players, **one** shared number vs c2a's five; 153 GT shots) — and ran the
+identical frozen pipeline, fully blind, GT scored once.
+
+| WHO (correct shooter) | duals | result |
+|---|---|---|
+| e6 (developed on) | 1 | 62% |
+| **2c490f1a (blind)** | **1** | **59%** |
+| c2a (blind) | 5 | 37% |
+
+**Answer: the logic generalizes — the c2a gap is the kit collision.** On a
+never-seen game with clean jerseys, shooter-naming lands within 3 points of
+the development game. Full blind line for 2c490f1a: detection **91%**
+(139/153), zone/FT 72%, make/miss 89%, complete-event **50%** — achieved
+despite a genuine venue fault discovered mid-run: **the near-right camera's
+recording stops 26 minutes in** (1559s vs 3079s on the other three), so the
+entire second half ran on three cameras (make/miss dips to 89% mainly from
+halved rim visibility). That camera-reliability finding goes on the venue
+list next to the earlier near-left concern. Consequences for the roadmap:
+dual-number handling (kit-anchor density, and the bigger-jersey-numbers
+venue request) is now the single highest-leverage WHO lever; the attribution
+logic itself needs no rework for clean-jersey games.
+
 ## Appendix A — How a player is tracked, start to finish
 
 1. **Detect** every player, every frame, every camera (solved, 96–100%).
