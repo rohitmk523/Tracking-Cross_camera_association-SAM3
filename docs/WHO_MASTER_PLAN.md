@@ -119,3 +119,11 @@ when a step lands; 13e1ffad stays sealed for the final validation.
   dense_verdict/apply_patches) for post-R2 retry on e6/2c4.
   NEXT: R2 claim carry-over across track death (SportSORT out-of-view
   re-association) — targets arc-cam presence ceiling (c2a 66%).
+- 2026-07-14 R2 claim carry-over: c2a WHO 40->40, arc ceiling 66->62 (wrong
+  inheritances pollute slightly). REVERTED. NOTE: c2a tracks currently from
+  R2 hybrid (fine — solved dumps equivalent at WHO level; canonical code
+  restored).
+- LADDER PRE-SAM2 EXHAUSTED. Kept total this session: e6 62->69, 2c4 59->63,
+  c2a 37->40 (+zones +6-8). c2a's residual gap (40 vs 79 ceiling) =
+  release-instant in tip chains + crowd pick — every cheap rung measured.
+  NEXT RUNG = SAM2 scrum-windows (user-gated: last resort, ~5% frames).
