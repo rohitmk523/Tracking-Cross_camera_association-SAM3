@@ -14,13 +14,14 @@ in-flight jobs, and traps already paid for.
 **ALL FOUR pipeline models are trained (one-time, apply to every game, NO per-game
 training):**
 1. Player/ref detector: yolo26s (production; runs/yolo26s-1280-ourdata-v1_fetch/…best.pt)
-2. Ball+HOOP specialist: yolo26s — **CORRECTED RETRAIN IN FLIGHT** (2026-07-13).
-   TWO dataset bugs found+fixed: (a) "require ball" filter starved hoop (0.588);
-   (b) 1,776 far-angle SHOT-FRAME hoop imgs (frame_*_make_LEFT, no gid) collapsed
-   into one pseudo-game -> ALL in test, ZERO in training (test hoop 0.53 vs valid
-   0.90 was a split artifact). Fix: unique key per no-gid frame -> train shot-frames
-   0->1,415. Old fetches DELETED (were epoch-22 bad-split). Fetch only AFTER
-   instance TERMINATED: aws_ball_train_job.py --fetch --model yolo26s.
+2. Ball+HOOP specialist: yolo26s — **DONE & VALIDATED (2026-07-13): Hoop mAP50
+   0.984 (was 0.588), Basketball 0.876, all 0.930 on the CLEAN val split.**
+   Weights: runs/ball_yolo26s_fetch/runs/detect/runs/ball-yolo26s-1280-v1/weights/best.pt
+   (epoch-13 best; instance i-02faf6eebfc88f248 hit 3h failsafe ~epoch 23, best
+   checkpoint banked by incremental uploader — normal). The TWO dataset bugs that
+   caused 0.588: (a) "require ball" filter starved hoop; (b) 1,776 far-angle
+   SHOT-FRAME hoop imgs (frame_*_make_LEFT, no gid) collapsed into one pseudo-game
+   -> ALL in test, ZERO in training. Both fixed in build_pooled_ball_dataset.py.
 3. Jersey OCR stack: legibility ResNet18 + localizer YOLO11n + PARSeq (runs/jersey/*.pt)
 4. KPR appearance: **cycle-2 adopted** (/tmp/kpr/pretrained_models/kpr_uball_ft.pth.tar;
    cycle-1 backup kpr_uball_ft_cyc1_bak.pth.tar). e6 = 81.7 strict / 86.2 fused.
@@ -71,13 +72,16 @@ feet-zone (62%). Make/miss = consume their p3 model.
    (detect_events.py has the timeline; rebound = first possession after a p3 MISS).
 
 ## IN-FLIGHT JOBS (gate on INSTANCE STATE, never shared log/results keys)
-- **Ball+HOOP CORRECTED retrain**: instance **i-02faf6eebfc88f248**, in flight 2026-07-13 (split-fix dataset: 11,788
-  imgs, train hoop 9,992 labels incl 1,415 shot-frames). ~$3. WATCHER RULE: gate on
-  describe-instances == terminated AND treat empty API response as "still running"
-  (previous watcher fetched an epoch-22 mid-run checkpoint on a blank response).
-- **Full-game e6 ball+hoop cache**: DONE but built with OLD weak-hoop weights →
-  QUARANTINED to runs/ball_cache_oldweights/. REBUILD with corrected weights via
-  aws_ballcache_job.py (--chunks all, --failsafe 9000) before shot detection.
+- **Ball+HOOP CORRECTED retrain**: DONE (see model 2 above; i-02faf6eebfc88f248
+  terminated, fetched, validated). WATCHER RULE stands: gate on describe-instances
+  == terminated AND treat empty API response as "still running".
+- **Full-game e6 ball+hoop cache (corrected weights)**: rebuild i-02ea94ff7d2a90636
+  got 4/6 chunks before its 9000s failsafe (per-chunk ≈28 min, not 20 — budget
+  ~30 min/chunk + 12 min setup). Fetched: 0_600..1800_600 × 4 angles (16 npz in
+  runs/ball_cache/). **TOP-UP i-07928fadf67e95bff in flight (2026-07-13 09:37 IST,
+  chunks 2400_600+3000_345, failsafe 7200, ~$1.4)**; fetch adds the 8 missing npz
+  (tar per-job → extraction won't clobber the 16). Old weak-hoop cache stays
+  quarantined in runs/ball_cache_oldweights/.
 - STALE DATA SWEPT (2026-07-13): bad-split fetch deleted; old ball caches
   quarantined; contaminated emb cache deleted; cycle-1 KPR dataset copies deleted;
   stale S3 results keys (ballce6f, ball_yolo26s bad-split) REMOVED so premature
