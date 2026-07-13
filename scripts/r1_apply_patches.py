@@ -23,9 +23,10 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--game", required=True)
     ap.add_argument("--dry", action="store_true")
+    ap.add_argument("--patches", default="patches.json")
     a = ap.parse_args()
     game = a.game
-    patches = json.loads((REPO / f"runs/r1_samples_{game[:3]}/patches.json").read_text())
+    patches = json.loads((REPO / f"runs/r1_samples_{game[:3]}/{a.patches}").read_text())
     moved = 0
     for tag in GAME_CHUNKS[game]:
         t0f = round(float(tag.split("_")[0]) * FPS)

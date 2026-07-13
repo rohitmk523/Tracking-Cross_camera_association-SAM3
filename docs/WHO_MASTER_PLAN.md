@@ -112,3 +112,10 @@ when a step lands; 13e1ffad stays sealed for the final validation.
   split/merge averages many crops; literature +4-10 HOTA). R1-full needs
   frame-sampling infra (~1 crop/2s per stream per cam from S3) — next
   session's build. SAM2 stays last per user directive.
+- 2026-07-14 R1-FULL verdict: coarse patches HARMFUL (c2a 40->36, 212k boxes,
+  reverted); dense boundary-precise patches (14, 1189 boxes, real n8B/n8W
+  confusions) NEUTRAL (40->40) — real switches, wrong moments. NOT adopted
+  (gate unmet); machinery kept (r1_sample_frames/tracklet_refine/
+  dense_verdict/apply_patches) for post-R2 retry on e6/2c4.
+  NEXT: R2 claim carry-over across track death (SportSORT out-of-view
+  re-association) — targets arc-cam presence ceiling (c2a 66%).
