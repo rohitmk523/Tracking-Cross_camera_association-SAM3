@@ -253,6 +253,8 @@ def main() -> int:
                                     else "4PT")
                 out.append({"t": round(t0_chunk + ref_f / FPS + clip_t0, 1),
                             "cam": arc_ang, "att_cam": att_ang, "chunk": tag,
+                            "arrive_f": int(arrive_f), "apex_f": int(apex_f),
+                            "rel_f": int(rel_f) if rel_f is not None else None,
                             "pred_player": name_of(pl) if pl else None,
                             "pred_zone": zone,
                             "release_dist_cm": round(dist, 1) if dist else None})
