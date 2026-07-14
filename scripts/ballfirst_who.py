@@ -178,7 +178,7 @@ def main() -> int:
     outp.write_text(json.dumps({"fps": FPS, "segments": segs}))
     print(f"holder cache -> {outp} ({len(segs)} segments)")
 
-    base_ok = v3_ok = tot = 0
+    base_ok = v3_ok = tgf_ok = tot = 0
     rows = []
     for g in gt:
         cand = [o for o in led if abs(o["t"] - g["t"]) <= 1.5 and o.get("rel_f") is not None]
@@ -202,6 +202,12 @@ def main() -> int:
             if h is not None:
                 pick, pf = h, f
                 break
+        # AMBIG fallback: v3 pick resolves to '?' (dual number, no kit
+        # suffix in the stream id) -> use baseline's answer for that play
+        fb_name = name_last(pick) if pick else "?"
+        if fb_name == "?" and o["pred_player"]:
+            fb_name = o["pred_player"].rstrip("?").split()[-1]
+        tgf_ok += fb_name == gt_last
         v3_ok += bool(pick and name_last(pick) == gt_last)
         b_ok = bool(o["pred_player"]
                     and o["pred_player"].rstrip("?").split()[-1] == gt_last)
@@ -212,7 +218,8 @@ def main() -> int:
                      "rq": o.get("rq"), "cls": g["cls"],
                      "dist": o.get("release_dist_cm")})
     print(f"\n{game}: n={tot} | baseline {base_ok}/{tot} ({base_ok/tot:.0%}) "
-          f"| v3 {v3_ok}/{tot} ({v3_ok/tot:.0%})")
+          f"| v3 {v3_ok}/{tot} ({v3_ok/tot:.0%}) "
+          f"| v3+ambig-fb {tgf_ok}/{tot} ({tgf_ok/tot:.0%})")
     def score(rule, label):
         ok = sum((r["v"] if rule(r) else r["b"]) for r in rows)
         print(f"  arbiter [{label}]: {ok}/{tot} ({ok/tot:.0%})")

@@ -146,3 +146,24 @@ highest-conf flight cam). Measured: shot-WHO identical on all 3 games
 (60/36/62 — rule fires too rarely to move totals); rebounds e6 50/54=93%
 WHO 16 unchanged, c2a WHO 25->24 (noise), 2c4 unchanged. KEPT for spec
 conformance; verdict = the landing rule is not where v3's shot gap lives.
+
+## Team-gate + ambig-fallback round (2026-07-15)
+Miss diagnosis first (probe): v3's shot misses are DEFENDER picks (e6 28/53,
+c2a 76/106, 2c4 25/53) + 16 AMBIG on 2c4; picked-holder hold length at pick
+median 20-32 frames (not flickers — the machine genuinely believes the
+defender holds it through the contest).
+1. ATTACK-TEAM-GATED walk-back (skip defending-team holders; atk per
+   (rim-end, half) from majority-of-baseline with change-point halftime
+   search): REFUTED HARD — e6 60->40, c2a 36->30, 2c4 62->37. Root cause:
+   the atk tables only reach 57-63% consistency (c2a "halftime" fit 520s =
+   noise) — either cam-prefix is not a reliable rim-end label or these rec
+   games don't keep ends cleanly; gating on a ~60% table poisons picks.
+   Code removed; the DEFENDER diagnosis stands, this atk source is dead.
+2. AMBIG FALLBACK (v3 pick resolves to '?' -> baseline's answer): 2c4
+   86->95 (62->68%), CROSSES baseline 88 (63%); e6/c2a unchanged (no AMBIG).
+   2c4 n8B/n8W kit streams exist — the 16 AMBIG are phantom-number streams
+   (misread jerseys not on either roster). Fails the >=2-games adoption gate
+   as a shot-path switch -> shots STAY baseline; kept as scorer metric.
+Shot-WHO state: baseline 69/40/63 vs v3-best 60/36/68. Ball-first wins
+rebounds (adopted) + one game's shots; crowd DEFENDER confusion at release
+is the remaining shot gap on all engines.
