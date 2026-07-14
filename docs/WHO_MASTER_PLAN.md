@@ -127,3 +127,16 @@ when a step lands; 13e1ffad stays sealed for the final validation.
   c2a 37->40 (+zones +6-8). c2a's residual gap (40 vs 79 ceiling) =
   release-instant in tip chains + crowd pick — every cheap rung measured.
   NEXT RUNG = SAM2 scrum-windows (user-gated: last resort, ~5% frames).
+- 2026-07-14 SAM2 SCRUM-WINDOW PROTOTYPE (final rung): 4/20 hard crowd shots
+  recovered (gate was >=8). Misses include d=0px mask-on-ball wrong picks =
+  seeds (our tracks at rel-2.2s) already wrong OR mask slid bodies in the
+  pile — SAM2 propagates identity, it cannot create it. LADDER COMPLETE:
+  every software family measured (geometric, appearance single+tracklet,
+  re-association, mask propagation).
+- CONCLUSION: the residual hard-crowd WHO gap (~c2a 40 vs 79 ceiling; paint
+  FG everywhere) is INFORMATION-LIMITED in this footage. Rational next moves:
+  (1) venue levers — BIGGER JERSEY NUMBERS (multiplies anchor density, the
+  one change that lifts every layer), camera re-aim, NR/NL reliability;
+  (2) user's 4-angle video review to confirm the unsolvable class visually;
+  (3) engineering effort re-aims at precision/robustness of what works
+  (detection 88-94, make/miss 89-98, zone 70-87) rather than the last WHO %.
