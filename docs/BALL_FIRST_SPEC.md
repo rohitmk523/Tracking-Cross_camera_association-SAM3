@@ -68,3 +68,18 @@ det/WHO, FT dedup (exactly 1 event per GT FT). 13e1ffad stays sealed.
    user's cited clips — the fastest feedback loop we have).
 3. Event emission from transitions -> three-game scoreboard.
 4. Swap into events_v2 assembler as engine v3 if it gates.
+
+
+## Prototype findings (2026-07-14, scripts/ballfirst_proto.py)
+- **CASE 1 SOLVED**: state machine reads 'Baad hold -> pass -> McKnight hold
+  1.5s -> rim' => SHOT by McKnight, CORRECT where release-attribution said
+  Baad. The user's architecture works on the exact case that defeated all
+  twelve scorer-side approaches.
+- CASE 5 (quick catch-and-finish): plain hysteresis misses the catch; fast
+  catch-switching over-switches to defenders. REQUIRED RULE for the full
+  build: at FLIGHT-END, assign holder by the ball TRAJECTORY LANDING point
+  (extrapolate last flight segment; the box it lands in gets the catch),
+  proximity votes only confirm. Also: e6 dual #6 needs the kit-split rerun
+  (name shows '#6?') — e6 tracks predate the kit-birth fix.
+- Renders: runs/event_demo/ballfirst_case{1,5}.mp4 (yellow holder + ball +
+  hoop + gray streams).
