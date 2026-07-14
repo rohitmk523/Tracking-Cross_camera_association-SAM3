@@ -33,7 +33,11 @@ ANGLES = ("FL", "FR", "NL", "NR")
 CHUNK_S = 600                                   # 10-min chunks
 OFFSETS = {"e6fba750": {"FL": 0, "FR": -11, "NL": -1, "NR": -1},
            "c2a354fe": {"FL": 0, "FR": 1, "NL": 2, "NR": -1},
-           "2c490f1a": {"FL": 0, "FR": 0, "NL": 0, "NR": 0}}
+           "2c490f1a": {"FL": 0, "FR": 0, "NL": 0, "NR": 0},
+           # audio+video sync UNRESOLVED for this Jan game: anchors baked
+           # cam-local (zeros); real offsets derived post-hoc from ball
+           # caches and applied at the LOCAL solve/consumer layer only
+           "13e1ffad": {"FL": 0, "FR": 0, "NL": 0, "NR": 0}}
 WEIGHTS = "runs/yolo26s-1280-ourdata-v1_fetch/runs/detect/runs/yolo26s-1280-ourdata-v1/weights/best.pt"
 
 

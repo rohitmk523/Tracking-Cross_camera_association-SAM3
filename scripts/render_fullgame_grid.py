@@ -60,8 +60,10 @@ def load_tracks(game, tglob):
 
 
 def load_ballz(game):
-    """(cam-local global frame, cls) -> [boxes]; cls 0 ball, 1 hoop."""
+    """(cam-local global frame, cls) -> boxes; cls 0 ball (BEST det only —
+    multiple dets per frame draw trail spiderwebs), cls 1 hoop (all)."""
     bz = {ang: defaultdict(list) for ang in ANGLES}
+    best = {ang: {} for ang in ANGLES}
     for tag in GAME_CHUNKS[game]:
         base = round(float(tag.split("_")[0]) * FPS)
         for ang in ANGLES:
@@ -69,9 +71,17 @@ def load_ballz(game):
             if not p.exists():
                 continue
             z = np.load(p)
-            for b, f, c in zip(z["boxes"], z["frame_idx"], z["classes"]):
-                bz[ang][(base + int(f), int(c))].append(
-                    [float(v) for v in b])
+            for b, s, f, c in zip(z["boxes"], z["scores"], z["frame_idx"],
+                                  z["classes"]):
+                gf = base + int(f)
+                if int(c) == 1:
+                    bz[ang][(gf, 1)].append([float(v) for v in b])
+                else:
+                    if gf not in best[ang] or s > best[ang][gf][1]:
+                        best[ang][gf] = ([float(v) for v in b], float(s))
+    for ang in ANGLES:
+        for gf, (b, _) in best[ang].items():
+            bz[ang][(gf, 0)].append(b)
     return bz
 
 
@@ -230,11 +240,13 @@ def main() -> int:
                 cx = int((b[0] + b[2]) / 2 / 1920 * CELL_W)
                 cy = int((b[1] + b[3]) / 2 / 1080 * CELL_H)
                 trail[ang].append((f, cx, cy))
-            pts = [(x, y) for tf, x, y in trail[ang] if f - tf <= TRAIL_N]
-            for i in range(1, len(pts)):
-                cv2.line(cell, pts[i - 1], pts[i], (0, 120, 200), 1)
+            pts = [(tf, x, y) for tf, x, y in trail[ang] if f - tf <= TRAIL_N]
+            for (t0, x0, y0), (t1, x1, y1) in zip(pts, pts[1:]):
+                # only join temporally-adjacent, spatially-plausible points
+                if t1 - t0 <= 3 and abs(x1 - x0) + abs(y1 - y0) <= 60:
+                    cv2.line(cell, (x0, y0), (x1, y1), (0, 120, 200), 1)
             if pts:
-                cv2.circle(cell, pts[-1], 6, (0, 165, 255), -1)
+                cv2.circle(cell, (pts[-1][1], pts[-1][2]), 6, (0, 165, 255), -1)
             x0, y0 = (gi % 2) * CELL_W, (gi // 2) * CELL_H
             canvas[y0:y0 + CELL_H, x0:x0 + CELL_W] = cell
             cv2.putText(canvas, ang, (x0 + 8, y0 + 22),
