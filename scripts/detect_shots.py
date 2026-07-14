@@ -120,7 +120,7 @@ def main() -> int:
     for pr in roster["players"]:
         by_num[pr["num"]].append(pr)
 
-    kit_team = {"B": 1, "W": 2}          # roster: team1_color Black, team2 White
+    kit_team = roster.get("kit_team", {"B": 1, "W": 2})   # per-game kit->team (e6/13e1: light kit = team1)
 
     def team_of(pl):
         n = int("".join(c for c in pl if c.isdigit()))

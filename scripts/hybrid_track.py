@@ -68,10 +68,10 @@ def main() -> int:
                 kit = ev.get("kit")
                 if kit not in ("B", "W"):
                     continue            # untagged read cannot claim a dual (rare: tags ~100%)
-                key = f"{num}{kit}"     # SEPARATE stream per (number, kit)
+                skey = f"{num}{kit}"    # SEPARATE stream per (number, kit)
             else:
-                key = str(num)
-            reads[(ev["cam"], cf)].append((key, ev["box"], ev["conf"]))
+                skey = str(num)
+            reads[(ev["cam"], cf)].append((skey, ev["box"], ev["conf"]))
 
     outd = REPO / a.out_dir
     outd.mkdir(parents=True, exist_ok=True)

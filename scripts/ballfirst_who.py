@@ -156,7 +156,7 @@ def main() -> int:
         c = by_num.get(num, [])
         if len(c) == 1:
             return c[0]["name"].split()[-1]
-        m = [p for p in c if p["team"] == {"B": 1, "W": 2}.get(kit)]
+        m = [p for p in c if p["team"] == roster.get("kit_team", {"B": 1, "W": 2}).get(kit)]
         return m[0]["name"].split()[-1] if len(m) == 1 else "?"
 
     timelines = {}

@@ -72,5 +72,9 @@
    "name": "Andre Del Castillo",
    "team": 2
   }
- ]
+ ],
+ "kit_team": {
+  "B": 2,
+  "W": 1
+ }
 }
