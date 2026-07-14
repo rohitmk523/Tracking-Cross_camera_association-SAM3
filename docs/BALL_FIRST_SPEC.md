@@ -120,3 +120,20 @@ rise past arbitration-need. Shot-WHO stays baseline (69/63/40) until then.
 - Holder caches: runs/tracking/ledger/holders_{game}.json (RLE, all 3 games,
   built by ballfirst_who.py). detect_possession_events consumes them when
   present; falls back to possession segments otherwise.
+
+## Emission-refinement round (2026-07-15): ALL FOUR REFUTED
+Measured on the assembler/rebound harnesses, each vs the adopted state:
+1. Rebound grab-window widened [f0-4,+4.5s]->[f0-15,+6.0s]: e6 det 93->87%
+   (earlier tip holders displace the real securer). REVERTED.
+2. Putback dedup by (t,player): e6 emitted 97->69, det -3 (kills real
+   putback chains — same player CAN rebound twice). REVERTED.
+3. Ball-cycle dedup (shot-family pairs <=8s, no holder-start between, keep
+   better rq): e6 det 134->129, m/m 98->93 — holder-cache GAPS make "no
+   holder between" false-positive on real consecutive shots. REVERTED.
+4. Narrowed to FT-pairs-only <=6s: still -2/-3 det everywhere (e6 131,
+   c2a 164, 2c4 137) — real GT FT pairs land within 6s. REVERTED.
+LESSON: the tier gate already killed phantom spam (83/381/219 -> 12/8/15);
+holder-cache coverage is not yet dense enough to power NEGATIVE evidence
+("no holder change happened") — only POSITIVE evidence (holder at t = X).
+Adopted state stands: e6 94% det / 59 all-correct, c2a 88/27, 2c4 91/52;
+rebounds e6 93% det.
