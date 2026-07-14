@@ -43,7 +43,7 @@ def holder_timeline(game, tag, offs, tglob):
                 z["frame_idx"], z["cx"], z["cy"], z["vx"], z["vy"],
                 z["imputed"], z["conf"]):
             bd[int(f)] = (float(cx), float(cy), float(np.hypot(vx, vy)),
-                          float(cf), int(imp))
+                          float(vx), float(vy), float(cf), int(imp))
         ball[ang] = bd
     for p in (REPO / tglob.format(tag=tag)).glob(f"{game}_{tag}__n*__*.json"):
         parts = p.stem.split("__")
@@ -61,16 +61,18 @@ def holder_timeline(game, tag, offs, tglob):
         votes = defaultdict(float)
         speeds = []
         flight_vec = None
+        fv_conf = -1.0
         for ang in ANGLES:
             cf = f + offs[ang]
             bb = ball[ang].get(cf)
             if not bb:
                 continue
-            bx, by, v, cfid, imp = bb
+            bx, by, v, vx, vy, cfid, imp = bb
             speeds.append(v)
-            if v > FLIGHT_V:
-                zz = ball[ang].get(cf)
-                flight_vec = (ang, bx, by, 0.0, 0.0)
+            if v > FLIGHT_V and cfid > fv_conf:
+                # real smoothed velocity — the LANDING rule extrapolates this
+                flight_vec = (ang, bx, by, vx, vy)
+                fv_conf = cfid
             wmul = 0.5 if imp else 1.0
             for sid, angs in tracks.items():
                 box = angs.get(ang, {}).get(cf)

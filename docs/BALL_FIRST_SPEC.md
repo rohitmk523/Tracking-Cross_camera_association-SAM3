@@ -137,3 +137,12 @@ holder-cache coverage is not yet dense enough to power NEGATIVE evidence
 ("no holder change happened") — only POSITIVE evidence (holder at t = X).
 Adopted state stands: e6 94% det / 59 all-correct, c2a 88/27, 2c4 91/52;
 rebounds e6 93% det.
+
+## Landing-rule velocity bugfix (2026-07-15): NEUTRAL, kept
+flight_vec stored vx=vy=0.0 (traj NPZ velocities were loaded then discarded)
+— the LANDING rule extrapolated with zero velocity since birth, i.e. "landing
+point" = last flight position. Fixed to carry real smoothed vx,vy (+ pick the
+highest-conf flight cam). Measured: shot-WHO identical on all 3 games
+(60/36/62 — rule fires too rarely to move totals); rebounds e6 50/54=93%
+WHO 16 unchanged, c2a WHO 25->24 (noise), 2c4 unchanged. KEPT for spec
+conformance; verdict = the landing rule is not where v3's shot gap lives.
