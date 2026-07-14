@@ -69,6 +69,7 @@ def main() -> int:
     pos = REPO / f"runs/tracking/ledger/possession_events_{game}.json"
     if pos.exists():
         ev = ev + json.loads(pos.read_text())["events"]
+    ev = [e for e in ev if e.get("tier", "high") == "high"]
     ev.sort(key=lambda e: e["t"])
     gt = [{"t": p["t"], "classification": p["cls"], "player_a": p["a"]} for p in plays]
 

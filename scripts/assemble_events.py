@@ -86,11 +86,17 @@ def main() -> int:
         cls = f"{base}_{verdict}" if verdict else f"{base}_ATTEMPT"
         if not o.get("pred_player") and verdict is None:
             continue                     # shot-ness gate: no evidence
+        # confidence TIER: high = clean release (rq<=1.6) AND a make/miss
+        # verdict — measured: phantoms 83/381/219 -> 12/8/15 across the three
+        # games at -1/-8/-2 detection. Low-tier events are KEPT in the JSON
+        # but excluded from demo feeds.
+        hi = (o.get("rq") is not None and o["rq"] <= 1.6 and verdict is not None)
         events.append({
             "t": o["t"], "classification": cls,
             "player_a": (o["pred_player"] or "?").rstrip("?"),
             "zone": o["pred_zone"], "release_dist_cm": d,
-            "source": "cv", "confidence": 0.8 if verdict else 0.5,
+            "tier": "high" if hi else "low",
+            "source": "cv", "confidence": 0.8 if hi else 0.4,
         })
     events.sort(key=lambda e: e["t"])
     out = REPO / f"runs/tracking/ledger/events_v2_{a.game}.json"
