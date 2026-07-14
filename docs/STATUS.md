@@ -497,6 +497,27 @@ for c2a's remaining gap: the correct player's track exists for 79% of its
 shots — the loss is the RELEASE INSTANT in tip/putback chains, next
 attacked via W2 (multi-game signal fusion) and W3 (appearance recovery).
 
+### Part 9 — the WHO ladder, run to completion (2026-07-14, evening)
+
+After round 1, every remaining software approach to crowd shooter-naming was
+built and measured, twelve in total — geometric refinements, statistical
+priors, appearance verification (single-frame and track-level with our
+fine-tuned recognition model), track re-association, and finally a targeted
+SAM2 mask-propagation prototype on the twenty hardest wrong-shooter moments
+(4/20 recovered; several failures had the mask ON the ball — the identity
+was already lost before the pile-up formed). Three changes survived their
+gates and are in production (the round-1 set); the other twelve are logged
+with numbers in docs/WHO_MASTER_PLAN.md.
+
+**The conclusion this buys, with evidence rather than opinion:** in pile-up
+moments the identity information is not reliably present in this footage —
+no software family extracts what the cameras did not capture. The WHO
+roadmap therefore shifts to the venue levers (bigger jersey numbers FIRST —
+it multiplies confident reads and lifts every layer at once; camera re-aim;
+near-camera reliability, two faults already documented) and to hardening
+what measurably works: detection 88-94%, make/miss 89-98%, zone 70-87%,
+with WHO at 69/63/40 across the three games.
+
 ## Appendix A — How a player is tracked, start to finish
 
 1. **Detect** every player, every frame, every camera (solved, 96–100%).
