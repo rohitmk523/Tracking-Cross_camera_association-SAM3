@@ -163,7 +163,8 @@ def main() -> int:
         timelines[tag], _ = holder_timeline(game, tag, offs, tglob)
         print(f"  [{tag}] holder frames: {len(timelines[tag])}", flush=True)
 
-    base_ok = v3_ok = arb_ok = tot = 0
+    base_ok = v3_ok = tot = 0
+    rows = []
     for g in gt:
         cand = [o for o in led if abs(o["t"] - g["t"]) <= 1.5 and o.get("rel_f") is not None]
         if not cand:
@@ -187,20 +188,28 @@ def main() -> int:
                 pick, pf = h, f
                 break
         v3_ok += bool(pick and name_last(pick) == gt_last)
-        # arbiter: v3 wins only on a CLEAN sustained hold (>=15 consecutive
-        # frames of the same holder ending at the release) — else baseline
-        hold_len = 0
-        if pick is not None:
-            f2 = pf
-            while tl.get(f2) == pick:
-                hold_len += 1
-                f2 -= 1
-        use_v3 = pick is not None and hold_len >= 15
-        arb_pick_ok = (name_last(pick) == gt_last) if use_v3 else             bool(o["pred_player"] and o["pred_player"].rstrip("?").split()[-1] == gt_last)
-        arb_ok += arb_pick_ok
-    print(f"\n{game}: n={tot} | baseline WHO {base_ok}/{tot} ({base_ok/tot:.0%}) "
-          f"| V3 {v3_ok}/{tot} ({v3_ok/tot:.0%}) "
-          f"| ARBITRATED {arb_ok}/{tot} ({arb_ok/tot:.0%})")
+        b_ok = bool(o["pred_player"]
+                    and o["pred_player"].rstrip("?").split()[-1] == gt_last)
+        v_ok = bool(pick and name_last(pick) == gt_last)
+        agree = bool(pick and o["pred_player"]
+                     and name_last(pick) == o["pred_player"].rstrip("?").split()[-1])
+        rows.append({"b": b_ok, "v": v_ok, "agree": agree,
+                     "rq": o.get("rq"), "cls": g["cls"],
+                     "dist": o.get("release_dist_cm")})
+    print(f"\n{game}: n={tot} | baseline {base_ok}/{tot} ({base_ok/tot:.0%}) "
+          f"| v3 {v3_ok}/{tot} ({v3_ok/tot:.0%})")
+    def score(rule, label):
+        ok = sum((r["v"] if rule(r) else r["b"]) for r in rows)
+        print(f"  arbiter [{label}]: {ok}/{tot} ({ok/tot:.0%})")
+    score(lambda r: not r["agree"] and r["rq"] is not None and r["rq"] > 0.6,
+          "a: disagree & dirty release -> v3")
+    score(lambda r: r["rq"] is not None and r["rq"] > 0.6, "b: dirty release -> v3")
+    score(lambda r: (r["dist"] or 9e9) < 500, "c: paint shots -> v3")
+    score(lambda r: not r["agree"] and (r["dist"] or 9e9) < 600,
+          "d: disagree & close -> v3")
+    both = sum(1 for r in rows if r["b"] and r["v"])
+    print(f"  union {sum(1 for r in rows if r['b'] or r['v'])}/{tot} | "
+          f"both {both} | agree-rate {sum(r['agree'] for r in rows)}/{tot}")
     return 0
 
 

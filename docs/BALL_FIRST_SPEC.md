@@ -97,3 +97,13 @@ det/WHO, FT dedup (exactly 1 event per GT FT). 13e1ffad stays sealed.
   (c) per-class routing (FG/paint -> v3, long-range -> baseline),
   (d) vote-mass margin of the hold.
 - e6 kit rerun DONE (n6B/n6W solved) — e6/2c4 v3 runs pending.
+
+## Arbiter round verdict (2026-07-14, late)
+All four pre-declared arbiters FAIL to capture the union (best = ties
+baseline; none beats it on any game). Unions exist everywhere (e6 77%,
+2c4 74%, c2a 52%) but no shallow feature (agreement/rq/class/dist)
+discriminates v3's wins from its losses. STOP RULE: no further rule-fishing
+(= fitting the test set). ROOT CAUSE: the holder machine runs on RAW
+per-frame ball detections — spec layer 1 (Kalman trajectory + 4-cam fusion)
+was skipped for speed. Next build = layer 1 properly, then v3 alone should
+rise past arbitration-need. Shot-WHO stays baseline (69/63/40) until then.
