@@ -107,3 +107,16 @@ discriminates v3's wins from its losses. STOP RULE: no further rule-fishing
 per-frame ball detections — spec layer 1 (Kalman trajectory + 4-cam fusion)
 was skipped for speed. Next build = layer 1 properly, then v3 alone should
 rise past arbitration-need. Shot-WHO stays baseline (69/63/40) until then.
+
+## v3 FIRST PRODUCTION ADOPTION (2026-07-14/15 night): REBOUNDS
+- Trajectories (layer 1) on shot-WHO: mixed (2c4 +3, e6 0, c2a -3) — shot-WHO
+  stays baseline 69/63/40. v3's shot value remains only-in-union; parked.
+- **REBOUNDS adopted on the v3 emission path** (first NEW holder after each
+  miss emits the event — time AND name from the ball story):
+  e6 detection 81->93% (50/54), WHO 15->16 of more-detected (all-GT 28->30%);
+  c2a WHO 20->25/78 (all-GT 21->26%). 2c4 GT n=6, noise.
+  Probe upside (37/28%) partially eaten by event-time matching tolerance —
+  emission-time refinement is a known follow-up.
+- Holder caches: runs/tracking/ledger/holders_{game}.json (RLE, all 3 games,
+  built by ballfirst_who.py). detect_possession_events consumes them when
+  present; falls back to possession segments otherwise.

@@ -183,6 +183,9 @@ def main() -> int:
             _gd[tag] = (ballc, trc)
         return _gd[tag]
 
+    v3p = REPO / f"runs/tracking/ledger/holders_{a.game}.json"
+    v3_segs = json.loads(v3p.read_text())["segments"] if v3p.exists() else []
+
     ev = json.loads((REPO / f"runs/tracking/ledger/events_v2_{a.game}.json").read_text())["events"]
     shots = [e for e in ev if not e["classification"].endswith("_ATTEMPT")]
     misses = [e for e in ev if e["classification"].endswith("_MISS")]
@@ -192,9 +195,28 @@ def main() -> int:
     for m in misses:
         lo = (m["t"] + REBOUND_WINDOW[0]) * FPS
         hi = (m["t"] + REBOUND_WINDOW[1]) * FPS
-        # the segment must BEGIN inside the window: the sticky possession keeps
-        # the SHOOTER as possessor through the ball flight, so his ongoing
-        # segment overlaps every post-miss window (measured: WHO 3/43)
+        # ENGINE V3 path: emit the rebound straight from the ball story —
+        # the first NEW holder after the miss IS the rebound (time + name),
+        # covering rebounds the possession-segment path never emitted
+        # (probe: e6 28->37, c2a 21->28 on all-GT basis)
+        if v3_segs:
+            f0 = int(m["t"] * FPS)
+            at_miss = next((pl for g0, g1, pl in v3_segs if g0 <= f0 <= g1), None)
+            starters = sorted((g0, pl) for g0, g1, pl in v3_segs
+                              if f0 - 4 <= g0 <= f0 + int(4.5 * FPS))
+            new_h = [(g0, pl) for g0, pl in starters if pl != at_miss]
+            g0, pl = (new_h[0] if new_h else (starters[0] if starters else (None, None)))
+            if pl is None:
+                continue
+            r = rec_of(pl)
+            sh_team = next((p["team"] for p in roster["players"]
+                            if p["name"] == m.get("player_a")), None)
+            kind = ("OFF" if r and sh_team and r["team"] == sh_team else
+                    "DEF" if r and sh_team else "?")
+            out.append({"t": round(g0 / FPS, 1), "classification": "REBOUND",
+                        "player_a": r["name"] if r else pl, "off_def": kind,
+                        "after_shot_t": m["t"], "source": "cv", "confidence": 0.6})
+            continue
         cand = [s for s in segs if lo <= s[0] <= hi
                 and min(s[1], hi) - s[0] + 1 >= SUSTAIN_F]
         if not cand:

@@ -35,14 +35,15 @@ def holder_timeline(game, tag, offs, tglob):
     """Chunk-wide holder per ref frame via the state machine."""
     ball, tracks = {}, defaultdict(dict)
     for ang in ANGLES:
-        z = np.load(REPO / f"runs/ball_cache/{game}_{ang}_{tag}.ball.npz")
+        # LAYER 1: smoothed trajectory (Kalman+RTS, gaps bridged) instead of
+        # raw per-frame detections — smooth velocity, teleports rejected
+        z = np.load(REPO / f"runs/ball_traj/{game}_{ang}_{tag}.traj.npz")
         bd = {}
-        for b, sc, f, c in zip(z["boxes"], z["scores"], z["frame_idx"], z["classes"]):
-            if int(c) != 0:
-                continue
-            f = int(f)
-            if f not in bd or sc > bd[f][1]:
-                bd[f] = ([float(v) for v in b], float(sc))
+        for f, cx, cy, vx, vy, imp, cf in zip(
+                z["frame_idx"], z["cx"], z["cy"], z["vx"], z["vy"],
+                z["imputed"], z["conf"]):
+            bd[int(f)] = (float(cx), float(cy), float(np.hypot(vx, vy)),
+                          float(cf), int(imp))
         ball[ang] = bd
     for p in (REPO / tglob.format(tag=tag)).glob(f"{game}_{tag}__n*__*.json"):
         parts = p.stem.split("__")
@@ -65,14 +66,12 @@ def holder_timeline(game, tag, offs, tglob):
             bb = ball[ang].get(cf)
             if not bb:
                 continue
-            bx, by = (bb[0][0] + bb[0][2]) / 2, (bb[0][1] + bb[0][3]) / 2
-            prev = ball[ang].get(cf - 3)
-            if prev:
-                px, py = (prev[0][0] + prev[0][2]) / 2, (prev[0][1] + prev[0][3]) / 2
-                v = np.hypot(bx - px, by - py) / 3
-                speeds.append(v)
-                if v > FLIGHT_V:
-                    flight_vec = (ang, bx, by, (bx - px) / 3, (by - py) / 3)
+            bx, by, v, cfid, imp = bb
+            speeds.append(v)
+            if v > FLIGHT_V:
+                zz = ball[ang].get(cf)
+                flight_vec = (ang, bx, by, 0.0, 0.0)
+            wmul = 0.5 if imp else 1.0
             for sid, angs in tracks.items():
                 box = angs.get(ang, {}).get(cf)
                 if box is None or by > box[3]:
@@ -80,7 +79,7 @@ def holder_timeline(game, tag, offs, tglob):
                 bw = max(box[2] - box[0], 1.0)
                 dx = abs(bx - (box[0] + box[2]) / 2) / bw
                 if dx <= HOLD_D and by >= box[1] - 0.1 * (box[3] - box[1]):
-                    votes[sid] += (1.0 - 0.5 * dx)
+                    votes[sid] += wmul * (1.0 - 0.5 * dx)
         v = float(np.median(speeds)) if speeds else None
         state = ("FLIGHT" if (v is not None and v > FLIGHT_V and not votes)
                  else "HOLD" if votes else "GAP")
@@ -162,6 +161,20 @@ def main() -> int:
     for tag in GAME_CHUNKS[game]:
         timelines[tag], _ = holder_timeline(game, tag, offs, tglob)
         print(f"  [{tag}] holder frames: {len(timelines[tag])}", flush=True)
+    # cache holder timelines as RLE segments (global frames) for the events layer
+    segs = []
+    for tag in GAME_CHUNKS[game]:
+        base = round(float(tag.split("_")[0]) * FPS)
+        for f in sorted(timelines[tag]):
+            pl = timelines[tag][f]
+            gf = base + f
+            if segs and segs[-1][2] == pl and gf - segs[-1][1] <= 3:
+                segs[-1][1] = gf
+            else:
+                segs.append([gf, gf, pl])
+    outp = REPO / f"runs/tracking/ledger/holders_{game}.json"
+    outp.write_text(json.dumps({"fps": FPS, "segments": segs}))
+    print(f"holder cache -> {outp} ({len(segs)} segments)")
 
     base_ok = v3_ok = tot = 0
     rows = []
