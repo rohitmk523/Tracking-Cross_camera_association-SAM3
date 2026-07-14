@@ -580,3 +580,15 @@ The picture is consistent and actionable:
 | `runs/tracking/pipeline_failure_heatmap.jpg` | where the current pipeline loses players (court heatmap) |
 | `runs/tracking/ledger/` | every experiment's scored result (the honesty trail) |
 | `data/kpr_finetune/` | 3,061 auto-labelled crops for the recognition fine-tune |
+
+## Addendum — fourth blind game + full-game review videos (2026-07-14)
+Fourth blind game 13e1ffad (Jan-31 footage) run fully blind: shot detection
+89% (109/122) confirms the detector/arc spine transfers across venue eras.
+Make/miss 61%, zone 45%, WHO 34% — all three trace to the January camera
+positions predating the court calibration (rim visibility 0.517 vs 0.844
+norm; NR cross-cam agreement floor 5.4m) plus a triple-worn #10. Full
+analysis: docs/13E1FFAD_BLIND_RESULTS.md. Four full-game 4-angle review
+videos with prediction-vs-GT feeds delivered under runs/event_demo/
+(fullgame_{e6fba750,c2a354fe,2c490f1a,13e1ffad}.mp4). Production finding:
+c2a's FR camera measured ~8 frames off its recorded sync by two independent
+instruments — corrected re-solve queued as a WHO lever.
