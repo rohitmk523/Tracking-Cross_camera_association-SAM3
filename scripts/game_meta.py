@@ -9,6 +9,9 @@ GAME_OFFS = {
     "e6fba750": {"FL": 0, "FR": -11, "NL": -1, "NR": -1},
     "c2a354fe": {"FL": 0, "FR": 1, "NL": 2, "NR": -1},
     "2c490f1a": {"FL": 0, "FR": 0, "NL": 0, "NR": 0},  # unmeasured; est. post-hoc
+    # audio (proven module, 4 slices): FR -15+/-3, NL -6+/-1; NR audio AND
+    # Jan-vs-Mar calibration both unusable -> NR 0 by decree, degraded role
+    "13e1ffad": {"FL": 0, "FR": -15, "NL": -6, "NR": 0},
 }
 
 GAME_CHUNKS = {

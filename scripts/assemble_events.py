@@ -124,7 +124,9 @@ def main() -> int:
             continue
         e = min(cand, key=lambda e: abs(e["t"] - g["t"]))
         det += 1; pc[1] += 1
-        w = e["player_a"].split()[-1] == g["a"].split()[-1]
+        # empty GT names exist (13e1ffad annotation gaps) — unscoreable = wrong
+        w = bool(g["a"]) and bool(e["player_a"]) \
+            and e["player_a"].split()[-1] == g["a"].split()[-1]
         z = (e["classification"].startswith("FREE_THROW") if gt_ft
              else e["zone"] == gtz)
         m = e["classification"].endswith(gt_mm)
