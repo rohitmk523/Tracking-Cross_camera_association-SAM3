@@ -70,7 +70,10 @@ def main() -> int:
         # FT: release from the line band; production isolation check lives in
         # detect_shots' fused positions — approximated here by the band alone
         # plus a low-variance dedup (FT pairs come 8-20s apart, same shooter).
-        is_ft = d is not None and FT_DIST_CM[0] <= d <= FT_DIST_CM[1] and o["pred_zone"] == "2PT"
+        # FT isolation REFUTED (2026-07-14): lane players stand <2m from the
+        # line — the gate rejected real FTs (zone/FT -4..-6 on all 3 games).
+        is_ft = (d is not None and FT_DIST_CM[0] <= d <= FT_DIST_CM[1]
+                 and o["pred_zone"] == "2PT")
         # make/miss: this arc event's own P3 verdict (arc-anchored window),
         # falling back to the nearest GT play's verdict for unmapped events
         verdict = None

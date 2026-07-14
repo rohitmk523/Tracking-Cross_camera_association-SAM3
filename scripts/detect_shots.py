@@ -287,7 +287,18 @@ def main() -> int:
                         if s:                   # is at the shooter's hands
                             break
                 pl, att_ang = (s[1], s[2]) if s else (None, None)
-                zone, dist = None, None
+                zone, dist, iso = None, None, None
+                if pl:
+                    pos0 = fused_feet(pl, arc_ang, rel_f)
+                    if pos0 is not None:
+                        ds2 = []
+                        for pl2 in players:
+                            if pl2 == pl:
+                                continue
+                            p2 = fused_feet(pl2, arc_ang, rel_f)
+                            if p2 is not None:
+                                ds2.append(float(np.linalg.norm(pos0 - p2)))
+                        iso = round(min(ds2), 1) if ds2 else None
                 if pl:
                     # farthest fused position across the set/release beats — a
                     # shooter drifts INWARD after release, never outward
@@ -317,6 +328,7 @@ def main() -> int:
                             "pred_player": name_of(pl) if pl else None,
                             "pred_zone": zone,
                             "rq": round(rq, 3) if rq is not None else None,
+                            "iso_cm": iso,
                             "release_dist_cm": round(dist, 1) if dist else None})
                 n_chunk += 1
         print(f"  [{tag}] {n_chunk} arc events")
