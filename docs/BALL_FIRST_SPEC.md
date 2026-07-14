@@ -83,3 +83,17 @@ det/WHO, FT dedup (exactly 1 event per GT FT). 13e1ffad stays sealed.
   (name shows '#6?') — e6 tracks predate the kit-birth fix.
 - Renders: runs/event_demo/ballfirst_case{1,5}.mp4 (yellow holder + ball +
   hoop + gray streams).
+
+## Engine v3 full-game status (2026-07-14 night)
+- scripts/ballfirst_who.py: full-game holder machine (catch + landing rules).
+  c2a: v3 alone 39% ~ baseline 40%. **COMPLEMENTARITY IS THE FINDING:
+  both-right 44 | v3-only 20 | baseline-only 23 | both-wrong 79 ->
+  union ceiling 52% (vs 40).** The +12pt prize is arbitration.
+- Hold-length arbiter (>=15f clean hold -> v3) REFUTED: 37% (stale long
+  holds are v3's own failure mode — length doesn't discriminate).
+- NEXT arbiter candidates (measure each, no fitting on c2a alone):
+  (a) v3-baseline AGREEMENT as high-confidence + landing-rule-fired flag,
+  (b) arc rq routing (clean release -> baseline; dirty -> v3),
+  (c) per-class routing (FG/paint -> v3, long-range -> baseline),
+  (d) vote-mass margin of the hold.
+- e6 kit rerun DONE (n6B/n6W solved) — e6/2c4 v3 runs pending.
