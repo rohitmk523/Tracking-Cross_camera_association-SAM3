@@ -37,7 +37,17 @@ def main() -> int:
     a = ap.parse_args()
     IN = REPO / f"runs/r1_samples_{a.game[:3]}"
     index = json.loads((IN / "index.json").read_text())
-    print(f"{len(index)} crops to embed", flush=True)
+    # subsample: <=40 crops per (stream, cam), evenly spaced in time
+    by_key = defaultdict(list)
+    for s in index:
+        by_key[(s["sid"], s["ang"])].append(s)
+    keep = []
+    for k, lst in by_key.items():
+        lst.sort(key=lambda s: s["gf"])
+        step = max(1, len(lst) // 40)
+        keep.extend(lst[::step][:40])
+    index = sorted(keep, key=lambda s: (s["sid"], s["ang"], s["gf"]))
+    print(f"{len(index)} crops to embed (subsampled)", flush=True)
 
     import torch
     from kpr_pilot import restricted_torch_load
@@ -64,7 +74,7 @@ def main() -> int:
         for s in index[s0:s0 + CH]:
             img = cv2.imread(str(IN / s["path"]))
             batch.append({"image": img,
-                          "keypoints_xyc": np.zeros((0, 3), np.float32),
+                          "keypoints_xyc": np.zeros((17, 3), np.float32),
                           "negative_kps": np.zeros((0, 17, 3), np.float32)})
         with torch.no_grad():
             _, e, v, _ = ext(batch)

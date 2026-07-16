@@ -80,6 +80,13 @@ complete. NO AWS jobs in flight.
   MAKE-MISS 98% (P3 arc-windows 0.9776) | ALL-CORRECT 75/134 (56%).**
   Per class det: 3PT 20/22 · 4PT 33/36 · FG 47/50 · FT 34/34.
 
+**TRAP (2026-07-13): /tmp/kpr venv DECAYS** — macOS periodic /tmp cleanup
+gutted 25 packages (deleted .py sources, kept __pycache__; also single-file
+modules like six.py). Repair recipe: scan site-packages for dirs with
+__pycache__ but no *.py, install exact dist-info-pinned versions into a fresh
+venv, cp -R over (no rm needed). BACKLOG: migrate /tmp/kpr to a permanent
+path. E1 release clips + E3 crops live in runs/ (safe).
+
 **THE one open quality problem: crowd/paint attribution** (FG WHO 36%,
 rebound WHO 34% — same root). Diagnosed: 8/12 errors have the right track
 present (2D ambiguity), 4/12 track absent. Ideas: jersey-anchor confidence at
