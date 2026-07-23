@@ -115,6 +115,14 @@ def main() -> int:
     ap.add_argument("--plays", default=None)
     ap.add_argument("--tracks-glob", default=None)
     ap.add_argument("--srcdir", default="runs/event_demo")
+    ap.add_argument("--ring", action="store_true",
+                    help="draw a glowing floor ring under the ball holder "
+                         "(follows the same fused identity across all 4 angles)")
+    ap.add_argument("--ring-mov",
+                    default="/home/akhilesh/Desktop/Uball/desgin/Circle.mov",
+                    help="alpha Circle.mov used for the ring")
+    ap.add_argument("--keep-holder-box", action="store_true",
+                    help="with --ring, also keep the thick yellow holder box")
     a = ap.parse_args()
     game = a.game
     OFFS = GAME_OFFS[game]
@@ -186,9 +194,22 @@ def main() -> int:
          "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-y", str(outp)],
         stdin=subprocess.PIPE)
 
+    # ring overlay (holder = a cross-camera fused identity -> same ring in every angle)
+    ring_ov, ring_n, ring_fps, ring_stab = None, 0, 24.0, {}
+    if a.ring:
+        from ring_overlay import (RingStabilizer, build_overlay_cache,
+                                   draw_ring_box, occlusion_from_boxes)
+        cache = str(outp.parent / "ring_cache.npy")
+        outp.parent.mkdir(parents=True, exist_ok=True)
+        ring_n, ring_fps = build_overlay_cache(a.ring_mov, cache)
+        ring_ov = np.load(cache, mmap_mode="r")
+        ring_stab = {ang: RingStabilizer() for ang in ANGLES}
+        print(f"ring: {ring_n} Circle.mov frames loaded", flush=True)
+
     trail = {ang: deque(maxlen=TRAIL_N) for ang in ANGLES}
     canvas = np.zeros((H, W, 3), np.uint8)
     frames = {}
+    prev_holder = None
     import time
     t_start = time.time()
     for fi in range(n_frames):
@@ -197,6 +218,14 @@ def main() -> int:
         canvas[:] = 0
         canvas[:, GRID_W:] = (24, 24, 28)
         holder = hold_at.get(f)
+        # possession switch -> snap the ring onto the new holder. apply()'s own
+        # snap test compares ground-locked Y, which the vertical lock holds near
+        # the old value, so a switch to a further-away player never trips it and
+        # the ring slides across the floor (sitting on the wrong player meanwhile).
+        if holder != prev_holder:
+            for stab in ring_stab.values():
+                stab.reset()
+            prev_holder = holder
         for gi, ang in enumerate(ANGLES):
             cap = caps[ang]
             if cap is None:
@@ -218,18 +247,36 @@ def main() -> int:
             gf = target
             # identity streams: every player, name above box
             # (boxes are in source 1920x1080 coords; cell is CELL_WxCELL_H)
+            holder_cell_box, cell_boxes = None, []
             for sid, angs in tracks.items():
                 box = angs.get(ang, {}).get(gf)
                 if box is None:
                     continue
                 bx1, by1 = int(box[0] / 1920 * CELL_W), int(box[1] / 1080 * CELL_H)
                 bx2, by2 = int(box[2] / 1920 * CELL_W), int(box[3] / 1080 * CELL_H)
+                cell_boxes.append((bx1, by1, bx2, by2))
                 is_h = (sid == holder)
+                if is_h:
+                    holder_cell_box = (bx1, by1, bx2, by2)
                 col = HOLDER_COL if is_h else TEAM_COL.get(teamof.get(sid))
-                cv2.rectangle(cell, (bx1, by1), (bx2, by2), col, 3 if is_h else 1)
+                # with --ring the ring marks the holder; suppress the thick box
+                # (unless --keep-holder-box) but keep every name label.
+                draw_box = not (is_h and ring_ov is not None and not a.keep_holder_box)
+                if draw_box:
+                    cv2.rectangle(cell, (bx1, by1), (bx2, by2), col, 3 if is_h else 1)
                 cv2.putText(cell, label.get(sid, sid), (bx1, max(10, by1 - 3)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.36, col,
                             2 if is_h else 1)
+            # glowing floor ring under the fused holder (behind players in front)
+            if ring_ov is not None:
+                if holder_cell_box is not None:
+                    occ = occlusion_from_boxes(cell_boxes, holder_cell_box, cell.shape)
+                    oidx = int(gf / FPS * ring_fps) % ring_n
+                    draw_ring_box(cell, holder_cell_box,
+                                  np.ascontiguousarray(ring_ov[oidx]),
+                                  stab=ring_stab[ang], occ=occ)
+                else:
+                    ring_stab[ang].reset()
             # hoop boxes
             for b in ballz[ang].get((gf, 1), []):
                 cv2.rectangle(cell, (int(b[0] / 1920 * CELL_W), int(b[1] / 1080 * CELL_H)),

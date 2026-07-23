@@ -1,0 +1,2566 @@
+diff --git a/RING_README.md b/RING_README.md
+new file mode 100644
+index 0000000..8c8ef63
+--- /dev/null
++++ b/RING_README.md
+@@ -0,0 +1,188 @@
++# Ring Overlay — Working Notes & Handoff
++
++Everything we've figured out about drawing the glowing **ball-possession ring**
++on the 4-angle fusion output, plus how to run it and how to process new footage.
++This is the memory doc — read it first when picking this back up.
++
++Last updated: 2026-07-22.
++
++---
++
++## TL;DR — where things stand
++
++- **The circle graphic is DONE and works on the real `e6fba750` fusion output.**
++  It draws a glowing `Circle.mov` ground ring under the ball holder in **all four
++  angles at once**, driven by the cross-camera fused identity (so it's the same
++  physical player in every view). Runs **locally, no GPU, no AWS**.
++- It's built **on top of** `scripts/render_fullgame_grid.py` (not from scratch),
++  via a new `--ring` flag.
++- To process **new footage** (e.g. a 20-second 4-angle clip): **your local GPU is
++  enough — AWS is NOT required.** The only blocker is having **calibration that
++  matches the footage** (+ optionally a roster for names).
++
++---
++
++## What was built (files in THIS repo)
++
++| File | What it is |
++|---|---|
++| `scripts/ring_overlay.py` | **NEW.** Self-contained ring renderer: decodes `Circle.mov` → alpha cache, One-Euro stabiliser with vertical ground-lock (ring stays planted when the holder jumps), box-anchored ground ellipse, and box-level occlusion (ring tucks behind players in front). |
++| `scripts/render_fullgame_grid.py` | **PATCHED.** Added `--ring` (draw the ring), `--ring-mov PATH` (default: `/home/akhilesh/Desktop/Uball/desgin/Circle.mov`), and `--keep-holder-box` (also keep the old thick yellow box). The ring replaces the yellow holder box; name labels stay. |
++
++`Circle.mov` currently lives in the `desgin/` repo and is referenced by absolute
++path. (A copy could be dropped into this repo if desgin ever moves.)
++
++---
++
++## How the ring attaches to the right player (the important part)
++
++We do **NOT** use "nearest player to the ball" per frame — that flickers and jumps
++during passes because the ball is only detected in 50–70% of frames.
++
++Instead the ring rides the **fused holder identity** from
++`runs/tracking/ledger/holders_e6fba750.json` (frame ranges → stream id like
++`n11`, at 29.97 fps). That ledger is the output of the ball-first possession state
++machine, which already applied all the smoothing (6-frame switch hysteresis,
++hold-through-dropout, flight logic). So:
++
++- **holder identity** comes from `holders_<game>.json` (already smoothed).
++- **per-camera box** for that identity comes from the `runs/events_fg_*` dumps:
++  `runs/events_fg_<tag>/<game>_<tag>__<sid>__<ANG>.json` → `{frames: {<cam_frame>: {box:[x1,y1,x2,y2], present:true}}}` in 1920×1080 px.
++- **camera-offset convention** (a documented trap): `cam_frame = ref_frame + GAME_OFFS[game][ANG]`. `render_fullgame_grid.py` already handles this (`target = f + OFFS[ang]`). e6 offsets: `FL 0, FR -11, NL -1, NR -1`.
++
++Because the holder id is one global identity, looking up its box in each camera
++puts the ring on the same person in all four views automatically. That lookup
++**is** the cross-camera association we're riding on.
++
++---
++
++## How to run it (e6fba750 — local, no GPU)
++
++**1. Get the artifacts in place** (once). The handoff zip populates gitignored
++`runs/` + `data/`:
++```bash
++# handoff_e6_artifacts.zip contains data/ and runs/ at top level
++cp -a /home/akhilesh/Downloads/handoff_e6_artifacts/runs/. runs/
++cp -a /home/akhilesh/Downloads/handoff_e6_artifacts/data/. data/
++```
++Provides: `holders_e6fba750.json`, `events_v2_*`, `possession_events_*`, the
++`events_fg_*` per-camera dumps, `ball_cache/`, `ball_traj/`, the 4 `fullsrc_e6fba750_<ANG>.mp4`
++low-res videos, rosters, plays.
++
++**2. Baseline render (guide fast path):**
++```bash
++PY=/home/akhilesh/Desktop/Uball/my/bin/python   # torch+CUDA venv; cv2/ffmpeg
++$PY scripts/render_fullgame_grid.py --game e6fba750 --out runs/event_demo/test.mp4 --t0 600 --dur 60
++```
++
++**3. With the ring (the circle graphic):**
++```bash
++$PY scripts/render_fullgame_grid.py --game e6fba750 --out runs/event_demo/ring.mp4 --t0 600 --dur 60 --ring
++# drop --t0/--dur for the full game (~30 min render)
++```
++Verified: ring lands on `#1 Veritas` (the holder) in FL/FR/NL/NR simultaneously.
++
++Env: use the `my` venv at `/home/akhilesh/Desktop/Uball/my/bin/python` (Python
++3.14, torch 2.12+cu130, cv2 5.0, ultralytics, av, onnxruntime 1.27). The system
++python 3.14 has none of these.
++
++---
++
++## Processing NEW footage (e.g. a ~20s 4-angle clip) — LOCAL, no AWS
++
++**Key finding: for short clips you do NOT need AWS.** Every GPU stage reads
++**local** clip files `data/clips/<game>_<ANG>_<tag>.mp4` and takes `--device cuda`.
++The `scripts/aws_*` jobs are just wrappers that slice those same clips from S3 and
++run the identical scripts on EC2 — worth it for a 55-min game (~6 GPU-hrs),
++pointless for ~600 frames. Your GPU does a 20s clip in minutes, for $0.
++
++Pipeline (all local):
++```
++data/clips/<gid>_<ANG>_<tag>.mp4   (put the 4 clips here; tag e.g. "0_20")
++  GPU  build_dets_cache_yolo.py  --game <gid> --tag <tag> --weights <yolo26s_player_referee_ball.pt> --device cuda   (imgsz 1280!)
++  GPU  build_ball_cache.py       --game <gid> --tag <tag> --weights <yolo26s_ball_hoop_specialist.pt> --device cuda
++  GPU  extract_pose.py           --game <gid> --tag <tag> --device cuda           (rtmlib ONNX)
++  GPU  extract_jersey_anchors.py --game <gid> --tag <tag>                          (auto-measures sync by audio)
++  CPU  hybrid_track.py -> solve_player_xcam.py (--pose --carry) -> ball_traj.py -> ballfirst_who.py
++  CPU  render_fullgame_grid.py --ring
++```
++Only new dependency: `pip install rtmlib` (pose). `ultralytics`, `onnxruntime`,
++`av` already present in the `my` venv. onnxruntime here is CPU-only providers;
++fine for 20s, or `pip install onnxruntime-gpu` for speed.
++
++### Trained weights (from handoff_weights_yolo26s.zip, in ~/Downloads)
++- `yolo26s_player_referee_ball.pt` — 0=player, 1=referee, 2=ball. Main detector.
++- `yolo26s_ball_hoop_specialist.pt` — 0=Basketball, 1=Basketball Hoop. **Use this
++  for the ball/rim; far better than the main model's ball class.**
++- `yolo11n_jersey_number_localizer.pt` — jersey number detection (optional).
++- **imgsz=1280 on EVERY predict** (trained at 1280 on 1080p; default 640 makes the
++  ~6px ball vanish). Ball `conf=0.15`, players `conf=0.25`. Keep only best ball/frame.
++
++### What's still needed to process a new clip
++1. **The 4 clips** (~20s, FL/FR/NL/NR).
++2. **Calibration matching the footage — the one real risk.** Cross-camera fusion
++   projects players to court cm via per-camera homographies (`configs/calib/<ANG>.json`).
++   - Same fixed court-a rig as e6, cameras unmoved → reuse e6 calib, works.
++   - Fresh camera setup → calib won't match → fusion breaks (see 10-2 below). Must
++     re-calibrate first.
++3. **Roster** `data/rosters/<gid>.json` (jersey #→name per team) — optional; without
++   it boxes show `#num` not names.
++4. **game_meta.py**: add `GAME_OFFS[<gid>]` and `GAME_CHUNKS[<gid>]` (one tag for 20s).
++   Sync offsets are auto-measured from audio by `extract_jersey_anchors.py`.
++5. Sync offsets: auto — no need to provide.
++
++### If AWS is still preferred
++Possible but heavier: upload 4 clips to S3 at `court-a/<date>/<gid>/...`, run
++`aws_fullgame_prep_job.py` + `aws_ballcache_job.py` (~$18–20, gated behind
++`UBALL_AWS_CREDS_ROTATED=1` / `--i-rotated-creds`), `--fetch`, then the local
++stages. Put creds in `~/.aws/credentials` (`aws configure --profile uball`) —
++never paste secrets in chat, never edit `.env` by hand (user manages secrets).
++
++---
++
++## Calibration mismatch — the "10-2" clips (cautionary tale)
++
++The `desgin/` folder's `10-2 *_5min.mp4` clips are a DIFFERENT game. The fusion
++repo's `configs/calib/*.json` were built for e6/etc. and **do NOT match 10-2**:
++- same player projected from two cameras lands **~460 cm apart** (should be <50 cm),
++- the projected court boundary floats over players' waists, not on the floor lines.
++This is the documented "median pair distance ≫ 100 cm ⇒ stale calibration" trap.
++Lesson: **any new footage from a re-placed rig needs fresh calibration** before
++cross-camera fusion will work.
++
++---
++
++## The `xring` side-repo (alternative approach — parked)
++
++`/home/akhilesh/Desktop/Uball/xring` — a self-contained attempt to build the ring
+++ cross-camera fusion from scratch on raw videos (geometric association, no
++jersey/AWS). Fully working: audio sync, per-camera ByteTrack, world model,
++possession, grid render. **Parked** because it needs correct calibration for the
++10-2 footage. It includes `calibrate.py` — an assisted click-to-calibrate tool
++(click ~8-13 court landmarks per camera → fits homography + lens term → writes
++`calib_local/<CAM>.json`). Use this if we ever need to calibrate a new rig for
++either repo. Fitting math validated (median reproj ~2 cm on synthetic clicks).
++
++---
++
++## Ground rules (from the handoff)
++
++- Never commit anything under `data/` or `runs/`, or any credential.
++- Do **not** run `scripts/aws_*` jobs without explicit approval (they cost money;
++  ~$18-20/game; gated behind `UBALL_AWS_CREDS_ROTATED=1`).
++- Do **not** rerun `detect_shots.py` on a processed game (overwrites scored ledgers).
++- Blind-game GT is scored ONCE — never tune against it.
++- Ultralytics = AGPL/commercial — prototype freely, clear the license before shipping.
++- Ask about offsets/AWS rather than guessing.
++
++---
++
++## Open questions / next actions
++
++- [ ] New clip: is it the **same court-a rig as e6** (reuse calib) or a **fresh
++      setup** (re-calibrate first)? — blocks fusion quality.
++- [ ] Provide the 4 clips + (optional) roster for the new game.
++- [ ] `pip install rtmlib` before the pose stage.
++- [ ] Optional ring polish: sine-alpha pulse + Gaussian-blur glow, or swap to
++      `sv.EllipseAnnotator`; match the reference video's exact ring style.
++- [ ] Full-game e6 render (drop `--t0/--dur`).
+diff --git a/data/plays/e6fba750_0_600.json b/data/plays/e6fba750_0_600.json
+deleted file mode 100644
+index 4a00afa..0000000
+--- a/data/plays/e6fba750_0_600.json
++++ /dev/null
+@@ -1,278 +0,0 @@
+-{
+- "game": "e6fba750",
+- "window": "0_600",
+- "clip_t0": 0.0,
+- "plays": [
+-  {
+-   "t": 8.8,
+-   "cls": "FG_MISS",
+-   "a": "Tajzmere Divine McKnight"
+-  },
+-  {
+-   "t": 12.7,
+-   "cls": "4PT_MISS",
+-   "a": "Dioscar Gregorio Gomez"
+-  },
+-  {
+-   "t": 28.8,
+-   "cls": "FG_MAKE",
+-   "a": "Bryant Besu",
+-   "b": "Bryant Besu"
+-  },
+-  {
+-   "t": 44,
+-   "cls": "FG_MISS",
+-   "a": "Daniel Mark Baad"
+-  },
+-  {
+-   "t": 46.5,
+-   "cls": "REBOUND",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 60.9,
+-   "cls": "3PT_MISS",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 63.5,
+-   "cls": "REBOUND",
+-   "a": "Dioscar Gregorio Gomez"
+-  },
+-  {
+-   "t": 68.2,
+-   "cls": "BLOCK",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 70.8,
+-   "cls": "REBOUND",
+-   "a": "Tajzmere Divine McKnight"
+-  },
+-  {
+-   "t": 77.6,
+-   "cls": "FG_MAKE",
+-   "a": "Dioscar Gregorio Gomez"
+-  },
+-  {
+-   "t": 91.6,
+-   "cls": "FG_MAKE",
+-   "a": "Brayan Delgado"
+-  },
+-  {
+-   "t": 101.9,
+-   "cls": "4PT_MAKE",
+-   "a": "Fui Martinez",
+-   "b": "Brayan Delgado"
+-  },
+-  {
+-   "t": 122.7,
+-   "cls": "3PT_MISS",
+-   "a": "Tajzmere Divine McKnight"
+-  },
+-  {
+-   "t": 124.8,
+-   "cls": "REBOUND",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 137.6,
+-   "cls": "FG_MAKE",
+-   "a": "Bryant Besu",
+-   "b": "Brayan Delgado"
+-  },
+-  {
+-   "t": 149.5,
+-   "cls": "4PT_MISS",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 158.2,
+-   "cls": "4PT_MISS",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 160.8,
+-   "cls": "REBOUND",
+-   "a": "Tajzmere Divine McKnight"
+-  },
+-  {
+-   "t": 166.1,
+-   "cls": "FG_MAKE",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 180.2,
+-   "cls": "4PT_MAKE",
+-   "a": "Brayan Delgado"
+-  },
+-  {
+-   "t": 192,
+-   "cls": "FG_MAKE",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 203.2,
+-   "cls": "3PT_MAKE",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 215.1,
+-   "cls": "FG_MAKE",
+-   "a": "Tajzmere Divine McKnight"
+-  },
+-  {
+-   "t": 236.5,
+-   "cls": "FG_MAKE",
+-   "a": "Brayan Delgado"
+-  },
+-  {
+-   "t": 248,
+-   "cls": "4PT_MAKE",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 317.9,
+-   "cls": "4PT_MAKE",
+-   "a": "Brayan Delgado"
+-  },
+-  {
+-   "t": 330.5,
+-   "cls": "FOUL",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 352.3,
+-   "cls": "FREE_THROW_MAKE",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 365.1,
+-   "cls": "FREE_THROW_MAKE",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 381.9,
+-   "cls": "FG_MAKE",
+-   "a": "Brayan Delgado"
+-  },
+-  {
+-   "t": 389.3,
+-   "cls": "3PT_MAKE",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 402.5,
+-   "cls": "3PT_MAKE",
+-   "a": "Bryant Besu",
+-   "b": "Bryant Besu"
+-  },
+-  {
+-   "t": 414.2,
+-   "cls": "4PT_MISS",
+-   "a": "Dioscar Gregorio Gomez"
+-  },
+-  {
+-   "t": 416.1,
+-   "cls": "REBOUND",
+-   "a": "Brayan Delgado"
+-  },
+-  {
+-   "t": 424.3,
+-   "cls": "FG_MAKE",
+-   "a": "Fui Martinez",
+-   "b": "Bryant Besu"
+-  },
+-  {
+-   "t": 436.8,
+-   "cls": "4PT_MISS",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 439.8,
+-   "cls": "REBOUND",
+-   "a": "Brayan Delgado"
+-  },
+-  {
+-   "t": 444.6,
+-   "cls": "4PT_MISS",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 446.7,
+-   "cls": "REBOUND",
+-   "a": "Dioscar Gregorio Gomez"
+-  },
+-  {
+-   "t": 450.7,
+-   "cls": "FOUL",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 469,
+-   "cls": "FREE_THROW_MISS",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 487.1,
+-   "cls": "FREE_THROW_MAKE",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 502,
+-   "cls": "3PT_MISS",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 504.2,
+-   "cls": "REBOUND",
+-   "a": "Tajzmere Divine McKnight"
+-  },
+-  {
+-   "t": 509.2,
+-   "cls": "FG_MAKE",
+-   "a": "Tajzmere Divine McKnight"
+-  },
+-  {
+-   "t": 522.3,
+-   "cls": "4PT_MISS",
+-   "a": "Brayan Delgado"
+-  },
+-  {
+-   "t": 525.3,
+-   "cls": "REBOUND",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 527.8,
+-   "cls": "FG_MAKE",
+-   "a": "Dioscar Gregorio Gomez",
+-   "b": "Jeff Vargas"
+-  },
+-  {
+-   "t": 542,
+-   "cls": "FOUL",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 551.9,
+-   "cls": "FG_MISS",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 554.1,
+-   "cls": "REBOUND",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 565.5,
+-   "cls": "FG_MISS",
+-   "a": "Dioscar Gregorio Gomez"
+-  },
+-  {
+-   "t": 587,
+-   "cls": "FREE_THROW_MAKE",
+-   "a": "Andre Del Castillo"
+-  }
+- ]
+-}
+\ No newline at end of file
+diff --git a/data/plays/e6fba750_1200_600.json b/data/plays/e6fba750_1200_600.json
+deleted file mode 100644
+index df608b9..0000000
+--- a/data/plays/e6fba750_1200_600.json
++++ /dev/null
+@@ -1,138 +0,0 @@
+-{
+- "game": "e6fba750",
+- "window": "1200_600",
+- "clip_t0": 1200.0,
+- "plays": [
+-  {
+-   "t": 1203.6,
+-   "cls": "FREE_THROW_MAKE",
+-   "a": "Truth Veritas"
+-  },
+-  {
+-   "t": 1217.6,
+-   "cls": "FREE_THROW_MISS",
+-   "a": "Truth Veritas"
+-  },
+-  {
+-   "t": 1227.5,
+-   "cls": "4PT_MISS",
+-   "a": "Andre Del Castillo"
+-  },
+-  {
+-   "t": 1228.3,
+-   "cls": "REBOUND",
+-   "a": "Truth Veritas"
+-  },
+-  {
+-   "t": 1235.6,
+-   "cls": "4PT_MISS",
+-   "a": "Brayan Delgado"
+-  },
+-  {
+-   "t": 1236.8,
+-   "cls": "REBOUND",
+-   "a": "Truth Veritas"
+-  },
+-  {
+-   "t": 1240.5,
+-   "cls": "3PT_MISS",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 1242.7,
+-   "cls": "REBOUND",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 1248,
+-   "cls": "FG_MAKE",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 1260.1,
+-   "cls": "FG_MISS",
+-   "a": "Truth Veritas"
+-  },
+-  {
+-   "t": 1261.3,
+-   "cls": "REBOUND",
+-   "a": "Christian Amado"
+-  },
+-  {
+-   "t": 1296.2,
+-   "cls": "3PT_MISS",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 1344.4,
+-   "cls": "FREE_THROW_MAKE",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 1354.4,
+-   "cls": "FREE_THROW_MAKE",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 1381.3,
+-   "cls": "FOUL",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 1400.9,
+-   "cls": "FREE_THROW_MAKE",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 1415.6,
+-   "cls": "FREE_THROW_MAKE",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 1441.1,
+-   "cls": "FG_MISS",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 1443.5,
+-   "cls": "REBOUND",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 1446.2,
+-   "cls": "FG_MAKE",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 1451.8,
+-   "cls": "4PT_MISS",
+-   "a": "Brayan Delgado"
+-  },
+-  {
+-   "t": 1723,
+-   "cls": "TIPOFF",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 1730.4,
+-   "cls": "FG_MISS",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 1732.1,
+-   "cls": "REBOUND",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 1762.8,
+-   "cls": "FG_MAKE",
+-   "a": "Brayan Delgado",
+-   "b": "Fui Martinez"
+-  },
+-  {
+-   "t": 1775.1,
+-   "cls": "4PT_MISS",
+-   "a": "Dioscar Gregorio Gomez"
+-  }
+- ]
+-}
+\ No newline at end of file
+diff --git a/data/plays/e6fba750_1800_600.json b/data/plays/e6fba750_1800_600.json
+deleted file mode 100644
+index a527e53..0000000
+--- a/data/plays/e6fba750_1800_600.json
++++ /dev/null
+@@ -1,200 +0,0 @@
+-{
+- "game": "e6fba750",
+- "window": "1800_600",
+- "clip_t0": 1800.0,
+- "plays": [
+-  {
+-   "t": 1816.3,
+-   "cls": "FG_MISS",
+-   "a": "Tajzmere Divine McKnight"
+-  },
+-  {
+-   "t": 1818.4,
+-   "cls": "REBOUND",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 1826.2,
+-   "cls": "3PT_MISS",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 1828.9,
+-   "cls": "REBOUND",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 1833.4,
+-   "cls": "TURNOVER",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 1849.7,
+-   "cls": "FOUL",
+-   "a": "Dioscar Gregorio Gomez"
+-  },
+-  {
+-   "t": 1886.4,
+-   "cls": "FOUL",
+-   "a": "Jordan Davis"
+-  },
+-  {
+-   "t": 1905.1,
+-   "cls": "FREE_THROW_MAKE",
+-   "a": "Jordan Davis"
+-  },
+-  {
+-   "t": 1917.9,
+-   "cls": "FREE_THROW_MISS",
+-   "a": "Jordan Davis"
+-  },
+-  {
+-   "t": 1919,
+-   "cls": "REBOUND",
+-   "a": "Tajzmere Divine McKnight"
+-  },
+-  {
+-   "t": 2077.3,
+-   "cls": "3PT_MAKE",
+-   "a": "Daniel Mark Baad",
+-   "b": "Tajzmere Divine McKnight"
+-  },
+-  {
+-   "t": 2087.4,
+-   "cls": "4PT_MISS",
+-   "a": "Brayan Delgado"
+-  },
+-  {
+-   "t": 2089.6,
+-   "cls": "REBOUND",
+-   "a": "Tajzmere Divine McKnight"
+-  },
+-  {
+-   "t": 2106.3,
+-   "cls": "FG_MAKE",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 2122.6,
+-   "cls": "3PT_MAKE",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 2133.8,
+-   "cls": "FG_MAKE",
+-   "a": "Tajzmere Divine McKnight"
+-  },
+-  {
+-   "t": 2154.8,
+-   "cls": "3PT_MISS",
+-   "a": "Brayan Delgado"
+-  },
+-  {
+-   "t": 2155.3,
+-   "cls": "REBOUND",
+-   "a": "Jordan Davis"
+-  },
+-  {
+-   "t": 2161.9,
+-   "cls": "FG_MAKE",
+-   "a": "Jordan Davis"
+-  },
+-  {
+-   "t": 2177.7,
+-   "cls": "4PT_MAKE",
+-   "a": "Dioscar Gregorio Gomez"
+-  },
+-  {
+-   "t": 2192.4,
+-   "cls": "STEAL",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 2197.8,
+-   "cls": "3PT_MISS",
+-   "a": "Daniel Mark Baad"
+-  },
+-  {
+-   "t": 2200.1,
+-   "cls": "REBOUND",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 2215.2,
+-   "cls": "FOUL",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 2232.7,
+-   "cls": "FREE_THROW_MISS",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 2253.1,
+-   "cls": "FREE_THROW_MAKE",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 2270.9,
+-   "cls": "3PT_MISS",
+-   "a": "Tajzmere Divine McKnight"
+-  },
+-  {
+-   "t": 2273.8,
+-   "cls": "REBOUND",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 2282.1,
+-   "cls": "TURNOVER",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 2305.2,
+-   "cls": "4PT_MISS",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 2307.8,
+-   "cls": "REBOUND",
+-   "a": "Jordan Davis"
+-  },
+-  {
+-   "t": 2313.2,
+-   "cls": "FG_MAKE",
+-   "a": "Brayan Delgado",
+-   "b": "Bryant Besu"
+-  },
+-  {
+-   "t": 2335.3,
+-   "cls": "FG_MAKE",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 2347,
+-   "cls": "FG_MAKE",
+-   "a": "Jordan Davis",
+-   "b": "Fui Martinez"
+-  },
+-  {
+-   "t": 2364.4,
+-   "cls": "4PT_MISS",
+-   "a": "Dioscar Gregorio Gomez"
+-  },
+-  {
+-   "t": 2366.2,
+-   "cls": "REBOUND",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 2392.8,
+-   "cls": "3PT_MISS",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 2395.7,
+-   "cls": "REBOUND",
+-   "a": "Dioscar Gregorio Gomez"
+-  }
+- ]
+-}
+\ No newline at end of file
+diff --git a/data/plays/e6fba750_2400_600.json b/data/plays/e6fba750_2400_600.json
+deleted file mode 100644
+index 8971028..0000000
+--- a/data/plays/e6fba750_2400_600.json
++++ /dev/null
+@@ -1,186 +0,0 @@
+-{
+- "game": "e6fba750",
+- "window": "2400_600",
+- "clip_t0": 2400.0,
+- "plays": [
+-  {
+-   "t": 2401.6,
+-   "cls": "FG_MISS",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 2404.8,
+-   "cls": "REBOUND",
+-   "a": "Jordan Davis"
+-  },
+-  {
+-   "t": 2432.6,
+-   "cls": "FG_MISS",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 2433.2,
+-   "cls": "REBOUND",
+-   "a": "Dioscar Gregorio Gomez"
+-  },
+-  {
+-   "t": 2469.3,
+-   "cls": "4PT_MISS",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 2525.4,
+-   "cls": "FG_MISS",
+-   "a": "Tajzmere Divine McKnight"
+-  },
+-  {
+-   "t": 2530.3,
+-   "cls": "REBOUND",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 2569.9,
+-   "cls": "4PT_MAKE",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 2586.9,
+-   "cls": "FG_MAKE",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 2606,
+-   "cls": "FREE_THROW_MAKE",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 2659.5,
+-   "cls": "FG_MAKE",
+-   "a": "Brayan Delgado",
+-   "b": "Fui Martinez"
+-  },
+-  {
+-   "t": 2690.8,
+-   "cls": "3PT_MISS",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 2693.7,
+-   "cls": "REBOUND",
+-   "a": "Truth Veritas"
+-  },
+-  {
+-   "t": 2696.4,
+-   "cls": "4PT_MISS",
+-   "a": "Brayan Delgado"
+-  },
+-  {
+-   "t": 2698.9,
+-   "cls": "REBOUND",
+-   "a": "Dioscar Gregorio Gomez"
+-  },
+-  {
+-   "t": 2701.5,
+-   "cls": "4PT_MISS",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 2704.7,
+-   "cls": "REBOUND",
+-   "a": "Brayan Delgado"
+-  },
+-  {
+-   "t": 2707.9,
+-   "cls": "3PT_MISS",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 2712.3,
+-   "cls": "REBOUND",
+-   "a": "Truth Veritas"
+-  },
+-  {
+-   "t": 2815.5,
+-   "cls": "FG_MAKE",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 2832.8,
+-   "cls": "FG_MISS",
+-   "a": "Jordan Davis"
+-  },
+-  {
+-   "t": 2836.4,
+-   "cls": "3PT_MISS",
+-   "a": "Andre Del Castillo"
+-  },
+-  {
+-   "t": 2839.6,
+-   "cls": "REBOUND",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 2858,
+-   "cls": "FG_MAKE",
+-   "a": "Bryant Besu",
+-   "b": "Fui Martinez"
+-  },
+-  {
+-   "t": 2875,
+-   "cls": "FOUL",
+-   "a": "Andre Del Castillo"
+-  },
+-  {
+-   "t": 2902.9,
+-   "cls": "FREE_THROW_MISS",
+-   "a": "Jordan Davis"
+-  },
+-  {
+-   "t": 2905.8,
+-   "cls": "REBOUND",
+-   "a": "Tajzmere Divine McKnight"
+-  },
+-  {
+-   "t": 2914.1,
+-   "cls": "4PT_MISS",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 2915.9,
+-   "cls": "REBOUND",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 2927.6,
+-   "cls": "4PT_MAKE",
+-   "a": "Brayan Delgado",
+-   "b": "Fui Martinez"
+-  },
+-  {
+-   "t": 2940.1,
+-   "cls": "4PT_MISS",
+-   "a": "Tajzmere Divine McKnight"
+-  },
+-  {
+-   "t": 2941.9,
+-   "cls": "REBOUND",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 2952.1,
+-   "cls": "4PT_MISS",
+-   "a": "Brayan Delgado"
+-  },
+-  {
+-   "t": 2970.2,
+-   "cls": "FG_MAKE",
+-   "a": "Jordan Davis",
+-   "b": "Brayan Delgado"
+-  },
+-  {
+-   "t": 2985.9,
+-   "cls": "FOUL",
+-   "a": "Jordan Davis"
+-  }
+- ]
+-}
+\ No newline at end of file
+diff --git a/data/plays/e6fba750_3000_345.json b/data/plays/e6fba750_3000_345.json
+deleted file mode 100644
+index adc0557..0000000
+--- a/data/plays/e6fba750_3000_345.json
++++ /dev/null
+@@ -1,123 +0,0 @@
+-{
+- "game": "e6fba750",
+- "window": "3000_345",
+- "clip_t0": 3000.0,
+- "plays": [
+-  {
+-   "t": 3000.3,
+-   "cls": "FREE_THROW_MAKE",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 3013.7,
+-   "cls": "FREE_THROW_MISS",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 3041.1,
+-   "cls": "FREE_THROW_MAKE",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 3055.1,
+-   "cls": "FREE_THROW_MISS",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 3056.5,
+-   "cls": "REBOUND",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 3086.3,
+-   "cls": "FOUL",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 3106.1,
+-   "cls": "FREE_THROW_MISS",
+-   "a": "Andre Del Castillo"
+-  },
+-  {
+-   "t": 3117.6,
+-   "cls": "FREE_THROW_MISS",
+-   "a": "Andre Del Castillo"
+-  },
+-  {
+-   "t": 3121.1,
+-   "cls": "REBOUND",
+-   "a": "Jordan Davis"
+-  },
+-  {
+-   "t": 3127.3,
+-   "cls": "FOUL",
+-   "a": "Tajzmere Divine McKnight"
+-  },
+-  {
+-   "t": 3149.7,
+-   "cls": "FREE_THROW_MAKE",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 3159.8,
+-   "cls": "FREE_THROW_MAKE",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 3173.7,
+-   "cls": "4PT_MISS",
+-   "a": "Tajzmere Divine McKnight"
+-  },
+-  {
+-   "t": 3175.5,
+-   "cls": "REBOUND",
+-   "a": "Brayan Delgado"
+-  },
+-  {
+-   "t": 3198.1,
+-   "cls": "3PT_MISS",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 3199.9,
+-   "cls": "REBOUND",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 3204.8,
+-   "cls": "4PT_MAKE",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 3213.8,
+-   "cls": "FOUL",
+-   "a": "Dioscar Gregorio Gomez"
+-  },
+-  {
+-   "t": 3235,
+-   "cls": "FREE_THROW_MISS",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 3249,
+-   "cls": "FREE_THROW_MAKE",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 3260.3,
+-   "cls": "FG_MAKE",
+-   "a": "Fui Martinez",
+-   "b": "Jordan Davis"
+-  },
+-  {
+-   "t": 3283.3,
+-   "cls": "4PT_MISS",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 3285.3,
+-   "cls": "REBOUND",
+-   "a": "Jordan Davis"
+-  }
+- ]
+-}
+\ No newline at end of file
+diff --git a/data/plays/e6fba750_44_60.json b/data/plays/e6fba750_44_60.json
+deleted file mode 100644
+index 7e78932..0000000
+--- a/data/plays/e6fba750_44_60.json
++++ /dev/null
+@@ -1,53 +0,0 @@
+-{
+- "game": "e6fba750",
+- "window": "44_60",
+- "clip_t0": 44.0,
+- "plays": [
+-  {
+-   "t": 44.0,
+-   "cls": "FG_MISS",
+-   "a": "Daniel Mark Baad"
+-  },
+-  {
+-   "t": 46.5,
+-   "cls": "REBOUND",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 60.9,
+-   "cls": "3PT_MISS",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 63.5,
+-   "cls": "REBOUND",
+-   "a": "Dioscar Gregorio Gomez"
+-  },
+-  {
+-   "t": 68.2,
+-   "cls": "BLOCK",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 70.8,
+-   "cls": "REBOUND",
+-   "a": "Tajzmere Divine McKnight"
+-  },
+-  {
+-   "t": 77.6,
+-   "cls": "FG_MAKE",
+-   "a": "Dioscar Gregorio Gomez"
+-  },
+-  {
+-   "t": 91.6,
+-   "cls": "FG_MAKE",
+-   "a": "Brayan Delgado"
+-  },
+-  {
+-   "t": 101.9,
+-   "cls": "4PT_MAKE",
+-   "a": "Fui Martinez",
+-   "b": "Brayan Delgado"
+-  }
+- ]
+-}
+\ No newline at end of file
+diff --git a/data/plays/e6fba750_600_600.json b/data/plays/e6fba750_600_600.json
+deleted file mode 100644
+index e52bd47..0000000
+--- a/data/plays/e6fba750_600_600.json
++++ /dev/null
+@@ -1,231 +0,0 @@
+-{
+- "game": "e6fba750",
+- "window": "600_600",
+- "clip_t0": 600.0,
+- "plays": [
+-  {
+-   "t": 603.1,
+-   "cls": "FREE_THROW_MISS",
+-   "a": "Andre Del Castillo"
+-  },
+-  {
+-   "t": 604.9,
+-   "cls": "REBOUND",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 615.3,
+-   "cls": "4PT_MISS",
+-   "a": "Truth Veritas"
+-  },
+-  {
+-   "t": 616.9,
+-   "cls": "REBOUND",
+-   "a": "Andre Del Castillo"
+-  },
+-  {
+-   "t": 625.7,
+-   "cls": "FG_MISS",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 626.7,
+-   "cls": "REBOUND",
+-   "a": "Truth Veritas"
+-  },
+-  {
+-   "t": 630.5,
+-   "cls": "FG_MAKE",
+-   "a": "Brayan Delgado"
+-  },
+-  {
+-   "t": 641.2,
+-   "cls": "4PT_MISS",
+-   "a": "Brayan Delgado"
+-  },
+-  {
+-   "t": 643.2,
+-   "cls": "REBOUND",
+-   "a": "Dioscar Gregorio Gomez"
+-  },
+-  {
+-   "t": 650.1,
+-   "cls": "FG_MISS",
+-   "a": "Michael Fernandez"
+-  },
+-  {
+-   "t": 652,
+-   "cls": "REBOUND",
+-   "a": "Dioscar Gregorio Gomez"
+-  },
+-  {
+-   "t": 655,
+-   "cls": "FG_MAKE",
+-   "a": "Andre Del Castillo"
+-  },
+-  {
+-   "t": 672.8,
+-   "cls": "FOUL",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 696.6,
+-   "cls": "FREE_THROW_MAKE",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 705.3,
+-   "cls": "FREE_THROW_MAKE",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 719.9,
+-   "cls": "FG_MISS",
+-   "a": "Dioscar Gregorio Gomez"
+-  },
+-  {
+-   "t": 721.4,
+-   "cls": "REBOUND",
+-   "a": "Truth Veritas"
+-  },
+-  {
+-   "t": 772,
+-   "cls": "FG_MISS",
+-   "a": "Brayan Delgado"
+-  },
+-  {
+-   "t": 779.9,
+-   "cls": "REBOUND",
+-   "a": "Andre Del Castillo"
+-  },
+-  {
+-   "t": 787.1,
+-   "cls": "4PT_MAKE",
+-   "a": "Andre Del Castillo"
+-  },
+-  {
+-   "t": 808.4,
+-   "cls": "FOUL",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 827,
+-   "cls": "FREE_THROW_MISS",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 839.5,
+-   "cls": "FREE_THROW_MISS",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 850.5,
+-   "cls": "FG_MISS",
+-   "a": "Andre Del Castillo"
+-  },
+-  {
+-   "t": 857.9,
+-   "cls": "3PT_MAKE",
+-   "a": "Fui Martinez",
+-   "b": "Bryant Besu"
+-  },
+-  {
+-   "t": 868.5,
+-   "cls": "FG_MAKE",
+-   "a": "Dioscar Gregorio Gomez"
+-  },
+-  {
+-   "t": 878.1,
+-   "cls": "FOUL",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 898.8,
+-   "cls": "4PT_MISS",
+-   "a": "Andre Del Castillo"
+-  },
+-  {
+-   "t": 900.8,
+-   "cls": "REBOUND",
+-   "a": "Michael Fernandez"
+-  },
+-  {
+-   "t": 914.2,
+-   "cls": "FG_MAKE",
+-   "a": "Dioscar Gregorio Gomez"
+-  },
+-  {
+-   "t": 947,
+-   "cls": "FOUL",
+-   "a": "Andre Del Castillo"
+-  },
+-  {
+-   "t": 968.2,
+-   "cls": "FREE_THROW_MAKE",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 983.3,
+-   "cls": "FREE_THROW_MAKE",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 998.2,
+-   "cls": "4PT_MISS",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 998.9,
+-   "cls": "REBOUND",
+-   "a": "Bryant Besu"
+-  },
+-  {
+-   "t": 1008.6,
+-   "cls": "FG_MISS",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 1010,
+-   "cls": "REBOUND",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 1014.7,
+-   "cls": "4PT_MAKE",
+-   "a": "Brayan Delgado",
+-   "b": "Fui Martinez"
+-  },
+-  {
+-   "t": 1031.2,
+-   "cls": "3PT_MAKE",
+-   "a": "Tajzmere Divine McKnight",
+-   "b": "Christian Amado"
+-  },
+-  {
+-   "t": 1049.1,
+-   "cls": "3PT_MAKE",
+-   "a": "Fui Martinez",
+-   "b": "Bryant Besu"
+-  },
+-  {
+-   "t": 1067.2,
+-   "cls": "TURNOVER",
+-   "a": "Andre Del Castillo"
+-  },
+-  {
+-   "t": 1074.7,
+-   "cls": "TURNOVER",
+-   "a": "Fui Martinez"
+-  },
+-  {
+-   "t": 1088.1,
+-   "cls": "FG_MISS",
+-   "a": "Jeff Vargas"
+-  },
+-  {
+-   "t": 1091.1,
+-   "cls": "REBOUND",
+-   "a": "Truth Veritas"
+-  }
+- ]
+-}
+\ No newline at end of file
+diff --git a/data/plays/e6fba750_full.json b/data/plays/e6fba750_full.json
+deleted file mode 100644
+index 8d0ca61..0000000
+--- a/data/plays/e6fba750_full.json
++++ /dev/null
+@@ -1 +0,0 @@
+-{"game": "e6fba750", "n": 219, "plays": [{"t": 8.8, "cls": "FG_MISS", "a": "Tajzmere Divine McKnight"}, {"t": 12.7, "cls": "4PT_MISS", "a": "Dioscar Gregorio Gomez"}, {"t": 28.8, "cls": "FG_MAKE", "a": "Bryant Besu", "b": "Bryant Besu"}, {"t": 44, "cls": "FG_MISS", "a": "Daniel Mark Baad"}, {"t": 46.5, "cls": "REBOUND", "a": "Fui Martinez"}, {"t": 60.9, "cls": "3PT_MISS", "a": "Fui Martinez"}, {"t": 63.5, "cls": "REBOUND", "a": "Dioscar Gregorio Gomez"}, {"t": 68.2, "cls": "BLOCK", "a": "Bryant Besu"}, {"t": 70.8, "cls": "REBOUND", "a": "Tajzmere Divine McKnight"}, {"t": 77.6, "cls": "FG_MAKE", "a": "Dioscar Gregorio Gomez"}, {"t": 91.6, "cls": "FG_MAKE", "a": "Brayan Delgado"}, {"t": 101.9, "cls": "4PT_MAKE", "a": "Fui Martinez", "b": "Brayan Delgado"}, {"t": 122.7, "cls": "3PT_MISS", "a": "Tajzmere Divine McKnight"}, {"t": 124.8, "cls": "REBOUND", "a": "Bryant Besu"}, {"t": 137.6, "cls": "FG_MAKE", "a": "Bryant Besu", "b": "Brayan Delgado"}, {"t": 149.5, "cls": "4PT_MISS", "a": "Jeff Vargas"}, {"t": 158.2, "cls": "4PT_MISS", "a": "Fui Martinez"}, {"t": 160.8, "cls": "REBOUND", "a": "Tajzmere Divine McKnight"}, {"t": 166.1, "cls": "FG_MAKE", "a": "Jeff Vargas"}, {"t": 180.2, "cls": "4PT_MAKE", "a": "Brayan Delgado"}, {"t": 192, "cls": "FG_MAKE", "a": "Jeff Vargas"}, {"t": 203.2, "cls": "3PT_MAKE", "a": "Fui Martinez"}, {"t": 215.1, "cls": "FG_MAKE", "a": "Tajzmere Divine McKnight"}, {"t": 236.5, "cls": "FG_MAKE", "a": "Brayan Delgado"}, {"t": 248, "cls": "4PT_MAKE", "a": "Jeff Vargas"}, {"t": 317.9, "cls": "4PT_MAKE", "a": "Brayan Delgado"}, {"t": 330.5, "cls": "FOUL", "a": "Jeff Vargas"}, {"t": 352.3, "cls": "FREE_THROW_MAKE", "a": "Jeff Vargas"}, {"t": 365.1, "cls": "FREE_THROW_MAKE", "a": "Jeff Vargas"}, {"t": 381.9, "cls": "FG_MAKE", "a": "Brayan Delgado"}, {"t": 389.3, "cls": "3PT_MAKE", "a": "Jeff Vargas"}, {"t": 402.5, "cls": "3PT_MAKE", "a": "Bryant Besu", "b": "Bryant Besu"}, {"t": 414.2, "cls": "4PT_MISS", "a": "Dioscar Gregorio Gomez"}, {"t": 416.1, "cls": "REBOUND", "a": "Brayan Delgado"}, {"t": 424.3, "cls": "FG_MAKE", "a": "Fui Martinez", "b": "Bryant Besu"}, {"t": 436.8, "cls": "4PT_MISS", "a": "Jeff Vargas"}, {"t": 439.8, "cls": "REBOUND", "a": "Brayan Delgado"}, {"t": 444.6, "cls": "4PT_MISS", "a": "Fui Martinez"}, {"t": 446.7, "cls": "REBOUND", "a": "Dioscar Gregorio Gomez"}, {"t": 450.7, "cls": "FOUL", "a": "Jeff Vargas"}, {"t": 469, "cls": "FREE_THROW_MISS", "a": "Jeff Vargas"}, {"t": 487.1, "cls": "FREE_THROW_MAKE", "a": "Jeff Vargas"}, {"t": 502, "cls": "3PT_MISS", "a": "Bryant Besu"}, {"t": 504.2, "cls": "REBOUND", "a": "Tajzmere Divine McKnight"}, {"t": 509.2, "cls": "FG_MAKE", "a": "Tajzmere Divine McKnight"}, {"t": 522.3, "cls": "4PT_MISS", "a": "Brayan Delgado"}, {"t": 525.3, "cls": "REBOUND", "a": "Jeff Vargas"}, {"t": 527.8, "cls": "FG_MAKE", "a": "Dioscar Gregorio Gomez", "b": "Jeff Vargas"}, {"t": 542, "cls": "FOUL", "a": "Jeff Vargas"}, {"t": 551.9, "cls": "FG_MISS", "a": "Fui Martinez"}, {"t": 554.1, "cls": "REBOUND", "a": "Jeff Vargas"}, {"t": 565.5, "cls": "FG_MISS", "a": "Dioscar Gregorio Gomez"}, {"t": 587, "cls": "FREE_THROW_MAKE", "a": "Andre Del Castillo"}, {"t": 603.1, "cls": "FREE_THROW_MISS", "a": "Andre Del Castillo"}, {"t": 604.9, "cls": "REBOUND", "a": "Bryant Besu"}, {"t": 615.3, "cls": "4PT_MISS", "a": "Truth Veritas"}, {"t": 616.9, "cls": "REBOUND", "a": "Andre Del Castillo"}, {"t": 625.7, "cls": "FG_MISS", "a": "Jeff Vargas"}, {"t": 626.7, "cls": "REBOUND", "a": "Truth Veritas"}, {"t": 630.5, "cls": "FG_MAKE", "a": "Brayan Delgado"}, {"t": 641.2, "cls": "4PT_MISS", "a": "Brayan Delgado"}, {"t": 643.2, "cls": "REBOUND", "a": "Dioscar Gregorio Gomez"}, {"t": 650.1, "cls": "FG_MISS", "a": "Michael Fernandez"}, {"t": 652, "cls": "REBOUND", "a": "Dioscar Gregorio Gomez"}, {"t": 655, "cls": "FG_MAKE", "a": "Andre Del Castillo"}, {"t": 672.8, "cls": "FOUL", "a": "Fui Martinez"}, {"t": 696.6, "cls": "FREE_THROW_MAKE", "a": "Fui Martinez"}, {"t": 705.3, "cls": "FREE_THROW_MAKE", "a": "Fui Martinez"}, {"t": 719.9, "cls": "FG_MISS", "a": "Dioscar Gregorio Gomez"}, {"t": 721.4, "cls": "REBOUND", "a": "Truth Veritas"}, {"t": 772, "cls": "FG_MISS", "a": "Brayan Delgado"}, {"t": 779.9, "cls": "REBOUND", "a": "Andre Del Castillo"}, {"t": 787.1, "cls": "4PT_MAKE", "a": "Andre Del Castillo"}, {"t": 808.4, "cls": "FOUL", "a": "Bryant Besu"}, {"t": 827, "cls": "FREE_THROW_MISS", "a": "Bryant Besu"}, {"t": 839.5, "cls": "FREE_THROW_MISS", "a": "Bryant Besu"}, {"t": 850.5, "cls": "FG_MISS", "a": "Andre Del Castillo"}, {"t": 857.9, "cls": "3PT_MAKE", "a": "Fui Martinez", "b": "Bryant Besu"}, {"t": 868.5, "cls": "FG_MAKE", "a": "Dioscar Gregorio Gomez"}, {"t": 878.1, "cls": "FOUL", "a": "Bryant Besu"}, {"t": 898.8, "cls": "4PT_MISS", "a": "Andre Del Castillo"}, {"t": 900.8, "cls": "REBOUND", "a": "Michael Fernandez"}, {"t": 914.2, "cls": "FG_MAKE", "a": "Dioscar Gregorio Gomez"}, {"t": 947, "cls": "FOUL", "a": "Andre Del Castillo"}, {"t": 968.2, "cls": "FREE_THROW_MAKE", "a": "Fui Martinez"}, {"t": 983.3, "cls": "FREE_THROW_MAKE", "a": "Fui Martinez"}, {"t": 998.2, "cls": "4PT_MISS", "a": "Jeff Vargas"}, {"t": 998.9, "cls": "REBOUND", "a": "Bryant Besu"}, {"t": 1008.6, "cls": "FG_MISS", "a": "Fui Martinez"}, {"t": 1010, "cls": "REBOUND", "a": "Fui Martinez"}, {"t": 1014.7, "cls": "4PT_MAKE", "a": "Brayan Delgado", "b": "Fui Martinez"}, {"t": 1031.2, "cls": "3PT_MAKE", "a": "Tajzmere Divine McKnight", "b": "Christian Amado"}, {"t": 1049.1, "cls": "3PT_MAKE", "a": "Fui Martinez", "b": "Bryant Besu"}, {"t": 1067.2, "cls": "TURNOVER", "a": "Andre Del Castillo"}, {"t": 1074.7, "cls": "TURNOVER", "a": "Fui Martinez"}, {"t": 1088.1, "cls": "FG_MISS", "a": "Jeff Vargas"}, {"t": 1091.1, "cls": "REBOUND", "a": "Truth Veritas"}, {"t": 1203.6, "cls": "FREE_THROW_MAKE", "a": "Truth Veritas"}, {"t": 1217.6, "cls": "FREE_THROW_MISS", "a": "Truth Veritas"}, {"t": 1227.5, "cls": "4PT_MISS", "a": "Andre Del Castillo"}, {"t": 1228.3, "cls": "REBOUND", "a": "Truth Veritas"}, {"t": 1235.6, "cls": "4PT_MISS", "a": "Brayan Delgado"}, {"t": 1236.8, "cls": "REBOUND", "a": "Truth Veritas"}, {"t": 1240.5, "cls": "3PT_MISS", "a": "Fui Martinez"}, {"t": 1242.7, "cls": "REBOUND", "a": "Jeff Vargas"}, {"t": 1248, "cls": "FG_MAKE", "a": "Jeff Vargas"}, {"t": 1260.1, "cls": "FG_MISS", "a": "Truth Veritas"}, {"t": 1261.3, "cls": "REBOUND", "a": "Christian Amado"}, {"t": 1296.2, "cls": "3PT_MISS", "a": "Jeff Vargas"}, {"t": 1344.4, "cls": "FREE_THROW_MAKE", "a": "Fui Martinez"}, {"t": 1354.4, "cls": "FREE_THROW_MAKE", "a": "Fui Martinez"}, {"t": 1381.3, "cls": "FOUL", "a": "Jeff Vargas"}, {"t": 1400.9, "cls": "FREE_THROW_MAKE", "a": "Jeff Vargas"}, {"t": 1415.6, "cls": "FREE_THROW_MAKE", "a": "Jeff Vargas"}, {"t": 1441.1, "cls": "FG_MISS", "a": "Bryant Besu"}, {"t": 1443.5, "cls": "REBOUND", "a": "Jeff Vargas"}, {"t": 1446.2, "cls": "FG_MAKE", "a": "Jeff Vargas"}, {"t": 1451.8, "cls": "4PT_MISS", "a": "Brayan Delgado"}, {"t": 1723, "cls": "TIPOFF", "a": "Fui Martinez"}, {"t": 1730.4, "cls": "FG_MISS", "a": "Jeff Vargas"}, {"t": 1732.1, "cls": "REBOUND", "a": "Bryant Besu"}, {"t": 1762.8, "cls": "FG_MAKE", "a": "Brayan Delgado", "b": "Fui Martinez"}, {"t": 1775.1, "cls": "4PT_MISS", "a": "Dioscar Gregorio Gomez"}, {"t": 1816.3, "cls": "FG_MISS", "a": "Tajzmere Divine McKnight"}, {"t": 1818.4, "cls": "REBOUND", "a": "Bryant Besu"}, {"t": 1826.2, "cls": "3PT_MISS", "a": "Fui Martinez"}, {"t": 1828.9, "cls": "REBOUND", "a": "Jeff Vargas"}, {"t": 1833.4, "cls": "TURNOVER", "a": "Jeff Vargas"}, {"t": 1849.7, "cls": "FOUL", "a": "Dioscar Gregorio Gomez"}, {"t": 1886.4, "cls": "FOUL", "a": "Jordan Davis"}, {"t": 1905.1, "cls": "FREE_THROW_MAKE", "a": "Jordan Davis"}, {"t": 1917.9, "cls": "FREE_THROW_MISS", "a": "Jordan Davis"}, {"t": 1919, "cls": "REBOUND", "a": "Tajzmere Divine McKnight"}, {"t": 2077.3, "cls": "3PT_MAKE", "a": "Daniel Mark Baad", "b": "Tajzmere Divine McKnight"}, {"t": 2087.4, "cls": "4PT_MISS", "a": "Brayan Delgado"}, {"t": 2089.6, "cls": "REBOUND", "a": "Tajzmere Divine McKnight"}, {"t": 2106.3, "cls": "FG_MAKE", "a": "Jeff Vargas"}, {"t": 2122.6, "cls": "3PT_MAKE", "a": "Bryant Besu"}, {"t": 2133.8, "cls": "FG_MAKE", "a": "Tajzmere Divine McKnight"}, {"t": 2154.8, "cls": "3PT_MISS", "a": "Brayan Delgado"}, {"t": 2155.3, "cls": "REBOUND", "a": "Jordan Davis"}, {"t": 2161.9, "cls": "FG_MAKE", "a": "Jordan Davis"}, {"t": 2177.7, "cls": "4PT_MAKE", "a": "Dioscar Gregorio Gomez"}, {"t": 2192.4, "cls": "STEAL", "a": "Jeff Vargas"}, {"t": 2197.8, "cls": "3PT_MISS", "a": "Daniel Mark Baad"}, {"t": 2200.1, "cls": "REBOUND", "a": "Bryant Besu"}, {"t": 2215.2, "cls": "FOUL", "a": "Bryant Besu"}, {"t": 2232.7, "cls": "FREE_THROW_MISS", "a": "Bryant Besu"}, {"t": 2253.1, "cls": "FREE_THROW_MAKE", "a": "Bryant Besu"}, {"t": 2270.9, "cls": "3PT_MISS", "a": "Tajzmere Divine McKnight"}, {"t": 2273.8, "cls": "REBOUND", "a": "Bryant Besu"}, {"t": 2282.1, "cls": "TURNOVER", "a": "Fui Martinez"}, {"t": 2305.2, "cls": "4PT_MISS", "a": "Jeff Vargas"}, {"t": 2307.8, "cls": "REBOUND", "a": "Jordan Davis"}, {"t": 2313.2, "cls": "FG_MAKE", "a": "Brayan Delgado", "b": "Bryant Besu"}, {"t": 2335.3, "cls": "FG_MAKE", "a": "Jeff Vargas"}, {"t": 2347, "cls": "FG_MAKE", "a": "Jordan Davis", "b": "Fui Martinez"}, {"t": 2364.4, "cls": "4PT_MISS", "a": "Dioscar Gregorio Gomez"}, {"t": 2366.2, "cls": "REBOUND", "a": "Fui Martinez"}, {"t": 2392.8, "cls": "3PT_MISS", "a": "Fui Martinez"}, {"t": 2395.7, "cls": "REBOUND", "a": "Dioscar Gregorio Gomez"}, {"t": 2401.6, "cls": "FG_MISS", "a": "Jeff Vargas"}, {"t": 2404.8, "cls": "REBOUND", "a": "Jordan Davis"}, {"t": 2432.6, "cls": "FG_MISS", "a": "Bryant Besu"}, {"t": 2433.2, "cls": "REBOUND", "a": "Dioscar Gregorio Gomez"}, {"t": 2469.3, "cls": "4PT_MISS", "a": "Jeff Vargas"}, {"t": 2525.4, "cls": "FG_MISS", "a": "Tajzmere Divine McKnight"}, {"t": 2530.3, "cls": "REBOUND", "a": "Bryant Besu"}, {"t": 2569.9, "cls": "4PT_MAKE", "a": "Jeff Vargas"}, {"t": 2586.9, "cls": "FG_MAKE", "a": "Fui Martinez"}, {"t": 2606, "cls": "FREE_THROW_MAKE", "a": "Fui Martinez"}, {"t": 2659.5, "cls": "FG_MAKE", "a": "Brayan Delgado", "b": "Fui Martinez"}, {"t": 2690.8, "cls": "3PT_MISS", "a": "Fui Martinez"}, {"t": 2693.7, "cls": "REBOUND", "a": "Truth Veritas"}, {"t": 2696.4, "cls": "4PT_MISS", "a": "Brayan Delgado"}, {"t": 2698.9, "cls": "REBOUND", "a": "Dioscar Gregorio Gomez"}, {"t": 2701.5, "cls": "4PT_MISS", "a": "Jeff Vargas"}, {"t": 2704.7, "cls": "REBOUND", "a": "Brayan Delgado"}, {"t": 2707.9, "cls": "3PT_MISS", "a": "Fui Martinez"}, {"t": 2712.3, "cls": "REBOUND", "a": "Truth Veritas"}, {"t": 2815.5, "cls": "FG_MAKE", "a": "Bryant Besu"}, {"t": 2832.8, "cls": "FG_MISS", "a": "Jordan Davis"}, {"t": 2836.4, "cls": "3PT_MISS", "a": "Andre Del Castillo"}, {"t": 2839.6, "cls": "REBOUND", "a": "Bryant Besu"}, {"t": 2858, "cls": "FG_MAKE", "a": "Bryant Besu", "b": "Fui Martinez"}, {"t": 2875, "cls": "FOUL", "a": "Andre Del Castillo"}, {"t": 2902.9, "cls": "FREE_THROW_MISS", "a": "Jordan Davis"}, {"t": 2905.8, "cls": "REBOUND", "a": "Tajzmere Divine McKnight"}, {"t": 2914.1, "cls": "4PT_MISS", "a": "Jeff Vargas"}, {"t": 2915.9, "cls": "REBOUND", "a": "Fui Martinez"}, {"t": 2927.6, "cls": "4PT_MAKE", "a": "Brayan Delgado", "b": "Fui Martinez"}, {"t": 2940.1, "cls": "4PT_MISS", "a": "Tajzmere Divine McKnight"}, {"t": 2941.9, "cls": "REBOUND", "a": "Bryant Besu"}, {"t": 2952.1, "cls": "4PT_MISS", "a": "Brayan Delgado"}, {"t": 2970.2, "cls": "FG_MAKE", "a": "Jordan Davis", "b": "Brayan Delgado"}, {"t": 2985.9, "cls": "FOUL", "a": "Jordan Davis"}, {"t": 3000.3, "cls": "FREE_THROW_MAKE", "a": "Jeff Vargas"}, {"t": 3013.7, "cls": "FREE_THROW_MISS", "a": "Jeff Vargas"}, {"t": 3041.1, "cls": "FREE_THROW_MAKE", "a": "Bryant Besu"}, {"t": 3055.1, "cls": "FREE_THROW_MISS", "a": "Bryant Besu"}, {"t": 3056.5, "cls": "REBOUND", "a": "Jeff Vargas"}, {"t": 3086.3, "cls": "FOUL", "a": "Bryant Besu"}, {"t": 3106.1, "cls": "FREE_THROW_MISS", "a": "Andre Del Castillo"}, {"t": 3117.6, "cls": "FREE_THROW_MISS", "a": "Andre Del Castillo"}, {"t": 3121.1, "cls": "REBOUND", "a": "Jordan Davis"}, {"t": 3127.3, "cls": "FOUL", "a": "Tajzmere Divine McKnight"}, {"t": 3149.7, "cls": "FREE_THROW_MAKE", "a": "Bryant Besu"}, {"t": 3159.8, "cls": "FREE_THROW_MAKE", "a": "Bryant Besu"}, {"t": 3173.7, "cls": "4PT_MISS", "a": "Tajzmere Divine McKnight"}, {"t": 3175.5, "cls": "REBOUND", "a": "Brayan Delgado"}, {"t": 3198.1, "cls": "3PT_MISS", "a": "Bryant Besu"}, {"t": 3199.9, "cls": "REBOUND", "a": "Jeff Vargas"}, {"t": 3204.8, "cls": "4PT_MAKE", "a": "Jeff Vargas"}, {"t": 3213.8, "cls": "FOUL", "a": "Dioscar Gregorio Gomez"}, {"t": 3235, "cls": "FREE_THROW_MISS", "a": "Fui Martinez"}, {"t": 3249, "cls": "FREE_THROW_MAKE", "a": "Fui Martinez"}, {"t": 3260.3, "cls": "FG_MAKE", "a": "Fui Martinez", "b": "Jordan Davis"}, {"t": 3283.3, "cls": "4PT_MISS", "a": "Fui Martinez"}, {"t": 3285.3, "cls": "REBOUND", "a": "Jordan Davis"}]}
+\ No newline at end of file
+diff --git a/data/plays/windows_snapshot.json b/data/plays/windows_snapshot.json
+deleted file mode 100644
+index 620c16f..0000000
+--- a/data/plays/windows_snapshot.json
++++ /dev/null
+@@ -1,477 +0,0 @@
+-{
+- "snapshot_note": "plays table windows around our 5 scored windows, joined to players.jersey_number (project mhbrsftxvxxtfgbajrlc, 2026-07-08)",
+- "rows": [
+-  {
+-   "gid8": "29b51d57",
+-   "ts": 476,
+-   "classification": "OTHER",
+-   "player_a": "Bryan Zomarriba",
+-   "player_b": null,
+-   "jersey_a": 8,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "29b51d57",
+-   "ts": 483.6,
+-   "classification": "3PT_MISS",
+-   "player_a": "Thomas Latham",
+-   "player_b": null,
+-   "jersey_a": 9,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "29b51d57",
+-   "ts": 485.9,
+-   "classification": "REBOUND",
+-   "player_a": "Carlos Solis",
+-   "player_b": null,
+-   "jersey_a": 2,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "29b51d57",
+-   "ts": 493.9,
+-   "classification": "3PT_MISS",
+-   "player_a": "Bryan Zomarriba",
+-   "player_b": null,
+-   "jersey_a": 8,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "29b51d57",
+-   "ts": 496.3,
+-   "classification": "REBOUND",
+-   "player_a": "Thomas Latham",
+-   "player_b": null,
+-   "jersey_a": 9,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "29b51d57",
+-   "ts": 506.1,
+-   "classification": "FG_MISS",
+-   "player_a": "Javier Pita",
+-   "player_b": null,
+-   "jersey_a": 3,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "29b51d57",
+-   "ts": 522.1,
+-   "classification": "FG_MAKE",
+-   "player_a": "Carlos Solis",
+-   "player_b": null,
+-   "jersey_a": 2,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "29b51d57",
+-   "ts": 541.5,
+-   "classification": "FG_MAKE",
+-   "player_a": "Julio Valle",
+-   "player_b": null,
+-   "jersey_a": 0,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "922bff3b",
+-   "ts": 755.3,
+-   "classification": "FG_MISS",
+-   "player_a": "Matthew Mairena",
+-   "player_b": null,
+-   "jersey_a": 2,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "922bff3b",
+-   "ts": 756.9,
+-   "classification": "REBOUND",
+-   "player_a": "Jose G. Carreno",
+-   "player_b": null,
+-   "jersey_a": 8,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "922bff3b",
+-   "ts": 765.4,
+-   "classification": "3PT_MISS",
+-   "player_a": "Jose G. Carreno",
+-   "player_b": null,
+-   "jersey_a": 8,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "922bff3b",
+-   "ts": 766.9,
+-   "classification": "REBOUND",
+-   "player_a": "Jose G. Carreno",
+-   "player_b": null,
+-   "jersey_a": 8,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "922bff3b",
+-   "ts": 771,
+-   "classification": "FG_MISS",
+-   "player_a": "Roberto Yapp",
+-   "player_b": null,
+-   "jersey_a": 30,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "922bff3b",
+-   "ts": 772.4,
+-   "classification": "REBOUND",
+-   "player_a": "5 Unnamed Player",
+-   "player_b": null,
+-   "jersey_a": 5,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "922bff3b",
+-   "ts": 780.2,
+-   "classification": "3PT_MISS",
+-   "player_a": "Anthony Salazar",
+-   "player_b": null,
+-   "jersey_a": 1,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "922bff3b",
+-   "ts": 782.8,
+-   "classification": "REBOUND",
+-   "player_a": "Neyser Rodriguez",
+-   "player_b": null,
+-   "jersey_a": 5,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "922bff3b",
+-   "ts": 790,
+-   "classification": "3PT_MISS",
+-   "player_a": "Seth Wolfson",
+-   "player_b": null,
+-   "jersey_a": 10,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "922bff3b",
+-   "ts": 792,
+-   "classification": "REBOUND",
+-   "player_a": "Jose G. Carreno",
+-   "player_b": null,
+-   "jersey_a": 8,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "922bff3b",
+-   "ts": 795,
+-   "classification": "OTHER",
+-   "player_a": "Jose G. Carreno",
+-   "player_b": null,
+-   "jersey_a": 8,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "922bff3b",
+-   "ts": 809.9,
+-   "classification": "4PT_MISS",
+-   "player_a": "Matthew Mairena",
+-   "player_b": null,
+-   "jersey_a": 2,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "922bff3b",
+-   "ts": 811.9,
+-   "classification": "REBOUND",
+-   "player_a": "Jose G. Carreno",
+-   "player_b": null,
+-   "jersey_a": 8,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "922bff3b",
+-   "ts": 819.5,
+-   "classification": "3PT_MISS",
+-   "player_a": "Pedro Ignacio Cano",
+-   "player_b": null,
+-   "jersey_a": 3,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "922bff3b",
+-   "ts": 821.9,
+-   "classification": "REBOUND",
+-   "player_a": "Matthew Mairena",
+-   "player_b": null,
+-   "jersey_a": 2,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "922bff3b",
+-   "ts": 828.4,
+-   "classification": "FG_MAKE",
+-   "player_a": "5 Unnamed Player",
+-   "player_b": null,
+-   "jersey_a": 5,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "b3c1f62c",
+-   "ts": 1351.1,
+-   "classification": "FREE_THROW_MISS",
+-   "player_a": "Andrew Mendez",
+-   "player_b": null,
+-   "jersey_a": 4,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "b3c1f62c",
+-   "ts": 1361.5,
+-   "classification": "FREE_THROW_MAKE",
+-   "player_a": "Andrew Mendez",
+-   "player_b": null,
+-   "jersey_a": 4,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "b3c1f62c",
+-   "ts": 1383.2,
+-   "classification": "3PT_MISS",
+-   "player_a": "Aneli Cutie",
+-   "player_b": null,
+-   "jersey_a": 5,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "b3c1f62c",
+-   "ts": 1389.2,
+-   "classification": "3PT_MISS",
+-   "player_a": "Andrew Mendez",
+-   "player_b": null,
+-   "jersey_a": 4,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "b3c1f62c",
+-   "ts": 1393.4,
+-   "classification": "FG_MAKE",
+-   "player_a": "Javier Serrano",
+-   "player_b": "Aneli Cutie",
+-   "jersey_a": 6,
+-   "jersey_b": 5
+-  },
+-  {
+-   "gid8": "c2a354fe",
+-   "ts": 309.2,
+-   "classification": "4PT_MAKE",
+-   "player_a": "Kevin Villarreal",
+-   "player_b": null,
+-   "jersey_a": 3,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "c2a354fe",
+-   "ts": 322.3,
+-   "classification": "3PT_MISS",
+-   "player_a": "Richard Li",
+-   "player_b": null,
+-   "jersey_a": 1,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "c2a354fe",
+-   "ts": 326.1,
+-   "classification": "REBOUND",
+-   "player_a": "Miles Torres-Grand",
+-   "player_b": null,
+-   "jersey_a": 8,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "c2a354fe",
+-   "ts": 334.6,
+-   "classification": "3PT_MISS",
+-   "player_a": "Jeremy Bull",
+-   "player_b": null,
+-   "jersey_a": 3,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "c2a354fe",
+-   "ts": 336.1,
+-   "classification": "REBOUND",
+-   "player_a": "Kevin Villarreal",
+-   "player_b": null,
+-   "jersey_a": 3,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "c2a354fe",
+-   "ts": 339.6,
+-   "classification": "4PT_MISS",
+-   "player_a": "Kevin Villarreal",
+-   "player_b": null,
+-   "jersey_a": 3,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "c2a354fe",
+-   "ts": 343.8,
+-   "classification": "REBOUND",
+-   "player_a": "Jeremy Bull",
+-   "player_b": null,
+-   "jersey_a": 3,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "c2a354fe",
+-   "ts": 348.4,
+-   "classification": "FG_MAKE",
+-   "player_a": "Richard Li",
+-   "player_b": null,
+-   "jersey_a": 1,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "e6fba750",
+-   "ts": 8.8,
+-   "classification": "FG_MISS",
+-   "player_a": "Tajzmere Divine McKnight",
+-   "player_b": null,
+-   "jersey_a": 22,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "e6fba750",
+-   "ts": 12.7,
+-   "classification": "4PT_MISS",
+-   "player_a": "Dioscar Gregorio Gomez",
+-   "player_b": null,
+-   "jersey_a": 11,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "e6fba750",
+-   "ts": 28.8,
+-   "classification": "FG_MAKE",
+-   "player_a": "Bryant Besu",
+-   "player_b": "Bryant Besu",
+-   "jersey_a": 90,
+-   "jersey_b": 90
+-  },
+-  {
+-   "gid8": "e6fba750",
+-   "ts": 44,
+-   "classification": "FG_MISS",
+-   "player_a": "Daniel Mark Baad",
+-   "player_b": null,
+-   "jersey_a": 25,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "e6fba750",
+-   "ts": 46.5,
+-   "classification": "REBOUND",
+-   "player_a": "Fui Martinez",
+-   "player_b": null,
+-   "jersey_a": 43,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "e6fba750",
+-   "ts": 60.9,
+-   "classification": "3PT_MISS",
+-   "player_a": "Fui Martinez",
+-   "player_b": null,
+-   "jersey_a": 43,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "e6fba750",
+-   "ts": 63.5,
+-   "classification": "REBOUND",
+-   "player_a": "Dioscar Gregorio Gomez",
+-   "player_b": null,
+-   "jersey_a": 11,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "e6fba750",
+-   "ts": 68.2,
+-   "classification": "BLOCK",
+-   "player_a": "Bryant Besu",
+-   "player_b": null,
+-   "jersey_a": 90,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "e6fba750",
+-   "ts": 70.8,
+-   "classification": "REBOUND",
+-   "player_a": "Tajzmere Divine McKnight",
+-   "player_b": null,
+-   "jersey_a": 22,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "e6fba750",
+-   "ts": 77.6,
+-   "classification": "FG_MAKE",
+-   "player_a": "Dioscar Gregorio Gomez",
+-   "player_b": null,
+-   "jersey_a": 11,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "e6fba750",
+-   "ts": 91.6,
+-   "classification": "FG_MAKE",
+-   "player_a": "Brayan Delgado",
+-   "player_b": null,
+-   "jersey_a": 6,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "e6fba750",
+-   "ts": 101.9,
+-   "classification": "4PT_MAKE",
+-   "player_a": "Fui Martinez",
+-   "player_b": "Brayan Delgado",
+-   "jersey_a": 43,
+-   "jersey_b": 6
+-  },
+-  {
+-   "gid8": "e6fba750",
+-   "ts": 122.7,
+-   "classification": "3PT_MISS",
+-   "player_a": "Tajzmere Divine McKnight",
+-   "player_b": null,
+-   "jersey_a": 22,
+-   "jersey_b": null
+-  },
+-  {
+-   "gid8": "e6fba750",
+-   "ts": 124.8,
+-   "classification": "REBOUND",
+-   "player_a": "Bryant Besu",
+-   "player_b": null,
+-   "jersey_a": 90,
+-   "jersey_b": null
+-  }
+- ],
+- "roster_e6fba750": {
+-  "0": "Jordan Davis",
+-  "1": "Truth Veritas",
+-  "6": "Michael Fernandez / Brayan Delgado",
+-  "8": "Christian Amado",
+-  "10": "Jeff Vargas",
+-  "11": "Dioscar Gregorio Gomez",
+-  "22": "Tajzmere Divine McKnight",
+-  "25": "Daniel Mark Baad",
+-  "43": "Fui Martinez",
+-  "55": "Andre Del Castillo",
+-  "90": "Bryant Besu"
+- }
+-}
+\ No newline at end of file
+diff --git a/data/rosters/c2a354fe.json b/data/rosters/c2a354fe.json
+deleted file mode 100644
+index b4e02aa..0000000
+--- a/data/rosters/c2a354fe.json
++++ /dev/null
+@@ -1,86 +0,0 @@
+-{
+- "team1_color": "Black",
+- "team2_color": "White",
+- "players": [
+-  {
+-   "num": 1,
+-   "name": "Richard Li",
+-   "team": 1
+-  },
+-  {
+-   "num": 2,
+-   "name": "Trent Wasser",
+-   "team": 1
+-  },
+-  {
+-   "num": 3,
+-   "name": "Jeremy Bull",
+-   "team": 1
+-  },
+-  {
+-   "num": 4,
+-   "name": "Jacob Finkel",
+-   "team": 1
+-  },
+-  {
+-   "num": 8,
+-   "name": "Miles Torres-Grand",
+-   "team": 1
+-  },
+-  {
+-   "num": 11,
+-   "name": "Tyler Zuluaga",
+-   "team": 1
+-  },
+-  {
+-   "num": 66,
+-   "name": "Nuno Grullon",
+-   "team": 1
+-  },
+-  {
+-   "num": 1,
+-   "name": "Marlon Fernandez",
+-   "team": 2
+-  },
+-  {
+-   "num": 2,
+-   "name": "Ovidio Garcia",
+-   "team": 2
+-  },
+-  {
+-   "num": 3,
+-   "name": "Kevin Villarreal",
+-   "team": 2
+-  },
+-  {
+-   "num": 4,
+-   "name": "Irving Zamora",
+-   "team": 2
+-  },
+-  {
+-   "num": 5,
+-   "name": "Bryan Rivera",
+-   "team": 2
+-  },
+-  {
+-   "num": 6,
+-   "name": "Gerardo Cruz",
+-   "team": 2
+-  },
+-  {
+-   "num": 7,
+-   "name": "Kenneth Hernandez",
+-   "team": 2
+-  },
+-  {
+-   "num": 8,
+-   "name": "Lionel Diego",
+-   "team": 2
+-  },
+-  {
+-   "num": 9,
+-   "name": "Joaldy Cruz",
+-   "team": 2
+-  }
+- ]
+-}
+\ No newline at end of file
+diff --git a/data/rosters/e6fba750.json b/data/rosters/e6fba750.json
+deleted file mode 100644
+index da8bb35..0000000
+--- a/data/rosters/e6fba750.json
++++ /dev/null
+@@ -1,80 +0,0 @@
+-{
+- "team1_color": "Blue",
+- "team2_color": "Green",
+- "players": [
+-  {
+-   "num": 0,
+-   "name": "Jordan Davis",
+-   "team": 1
+-  },
+-  {
+-   "num": 1,
+-   "name": "Truth Veritas",
+-   "team": 1
+-  },
+-  {
+-   "num": 5,
+-   "name": "Stanley Chamblain",
+-   "team": 1
+-  },
+-  {
+-   "num": 6,
+-   "name": "Brayan Delgado",
+-   "team": 1
+-  },
+-  {
+-   "num": 43,
+-   "name": "Fui Martinez",
+-   "team": 1
+-  },
+-  {
+-   "num": 90,
+-   "name": "Bryant Besu",
+-   "team": 1
+-  },
+-  {
+-   "num": 3,
+-   "name": "Aaron Anthony Vidal",
+-   "team": 2
+-  },
+-  {
+-   "num": 6,
+-   "name": "Michael Fernandez",
+-   "team": 2
+-  },
+-  {
+-   "num": 8,
+-   "name": "Christian Amado",
+-   "team": 2
+-  },
+-  {
+-   "num": 10,
+-   "name": "Jeff Vargas",
+-   "team": 2
+-  },
+-  {
+-   "num": 11,
+-   "name": "Dioscar Gregorio Gomez",
+-   "team": 2
+-  },
+-  {
+-   "num": 22,
+-   "name": "Tajzmere Divine McKnight",
+-   "team": 2
+-  },
+-  {
+-   "num": 25,
+-   "name": "Daniel Mark Baad",
+-   "team": 2
+-  },
+-  {
+-   "num": 55,
+-   "name": "Andre Del Castillo",
+-   "team": 2
+-  }
+- ],
+- "kit_team": {
+-  "B": 2,
+-  "W": 1
+- }
+-}
+\ No newline at end of file
+diff --git a/data/rosters/f66eb3b2.json b/data/rosters/f66eb3b2.json
+deleted file mode 100644
+index 9871283..0000000
+--- a/data/rosters/f66eb3b2.json
++++ /dev/null
+@@ -1,91 +0,0 @@
+-{
+- "team1_color": "White",
+- "team2_color": "Black",
+- "players": [
+-  {
+-   "num": 1,
+-   "name": "Marlon Fernandez",
+-   "team": 1
+-  },
+-  {
+-   "num": 2,
+-   "name": "Ovidio Garcia",
+-   "team": 1
+-  },
+-  {
+-   "num": 3,
+-   "name": "Kevin Villarreal",
+-   "team": 1
+-  },
+-  {
+-   "num": 4,
+-   "name": "Irving Zamora",
+-   "team": 1
+-  },
+-  {
+-   "num": 5,
+-   "name": "Bryan Rivera",
+-   "team": 1
+-  },
+-  {
+-   "num": 6,
+-   "name": "Gerardo Cruz",
+-   "team": 1
+-  },
+-  {
+-   "num": 7,
+-   "name": "Kenneth Hernandez",
+-   "team": 1
+-  },
+-  {
+-   "num": 8,
+-   "name": "Lionel Diego",
+-   "team": 1
+-  },
+-  {
+-   "num": 9,
+-   "name": "Joaldy Cruz",
+-   "team": 1
+-  },
+-  {
+-   "num": 2,
+-   "name": "Carlos Castillo",
+-   "team": 2
+-  },
+-  {
+-   "num": 3,
+-   "name": "Mario Cabrejos",
+-   "team": 2
+-  },
+-  {
+-   "num": 7,
+-   "name": "Adolfo Diaz",
+-   "team": 2
+-  },
+-  {
+-   "num": 8,
+-   "name": "Anthony Lanza",
+-   "team": 2
+-  },
+-  {
+-   "num": 11,
+-   "name": "Scott Yogodzinski",
+-   "team": 2
+-  },
+-  {
+-   "num": 12,
+-   "name": "Chris Garrido",
+-   "team": 2
+-  },
+-  {
+-   "num": 24,
+-   "name": "Chris Ribero",
+-   "team": 2
+-  },
+-  {
+-   "num": 32,
+-   "name": "Unknown player",
+-   "team": 2
+-  }
+- ]
+-}
+\ No newline at end of file
+diff --git a/runs/tracking/ledger/master_scorecard.jsonl b/runs/tracking/ledger/master_scorecard.jsonl
+deleted file mode 100644
+index a6d2638..0000000
+--- a/runs/tracking/ledger/master_scorecard.jsonl
++++ /dev/null
+@@ -1,59 +0,0 @@
+-{"window": "e6_44_60", "version": "v2", "player": "ref_1", "gt_frames": 826, "observed_coverage": 0.93, "id_purity": 0.275, "dominant_gid": 1, "n_identities": 10, "switches": 56}
+-{"window": "e6_44_60", "version": "v2", "player": "#11", "gt_frames": 1744, "observed_coverage": 0.697, "id_purity": 0.549, "dominant_gid": 21, "n_identities": 16, "switches": 72}
+-{"window": "e6_44_60", "version": "v2", "player": "#6", "gt_frames": 1742, "observed_coverage": 0.955, "id_purity": 0.517, "dominant_gid": 2, "n_identities": 14, "switches": 90}
+-{"window": "e6_44_60", "version": "v2", "player": "#22", "gt_frames": 1673, "observed_coverage": 0.934, "id_purity": 0.421, "dominant_gid": 3, "n_identities": 15, "switches": 116}
+-{"window": "e6_44_60", "version": "v2", "player": "#43", "gt_frames": 1788, "observed_coverage": 0.954, "id_purity": 0.307, "dominant_gid": 2, "n_identities": 12, "switches": 43}
+-{"window": "e6_44_60", "version": "v2_1", "player": "ref_1", "gt_frames": 826, "observed_coverage": 0.916, "id_purity": 0.357, "dominant_gid": 19, "n_identities": 7, "switches": 58}
+-{"window": "e6_44_60", "version": "v2_1", "player": "#11", "gt_frames": 1744, "observed_coverage": 0.669, "id_purity": 0.361, "dominant_gid": 41, "n_identities": 17, "switches": 66}
+-{"window": "e6_44_60", "version": "v2_1", "player": "#6", "gt_frames": 1742, "observed_coverage": 0.897, "id_purity": 0.332, "dominant_gid": 7, "n_identities": 17, "switches": 121}
+-{"window": "e6_44_60", "version": "v2_1", "player": "#22", "gt_frames": 1673, "observed_coverage": 0.922, "id_purity": 0.383, "dominant_gid": 2, "n_identities": 15, "switches": 118}
+-{"window": "e6_44_60", "version": "v2_1", "player": "#43", "gt_frames": 1788, "observed_coverage": 0.944, "id_purity": 0.327, "dominant_gid": 10, "n_identities": 12, "switches": 57}
+-{"window": "e6_44_60", "version": "v2_2", "player": "ref_1", "gt_frames": 826, "observed_coverage": 0.826, "id_purity": 0.441, "dominant_gid": 14, "n_identities": 11, "switches": 54}
+-{"window": "e6_44_60", "version": "v2_2", "player": "#11", "gt_frames": 1744, "observed_coverage": 0.852, "id_purity": 0.474, "dominant_gid": 3, "n_identities": 19, "switches": 93}
+-{"window": "e6_44_60", "version": "v2_2", "player": "#6", "gt_frames": 1742, "observed_coverage": 0.955, "id_purity": 0.278, "dominant_gid": 9, "n_identities": 18, "switches": 114}
+-{"window": "e6_44_60", "version": "v2_2", "player": "#22", "gt_frames": 1673, "observed_coverage": 0.94, "id_purity": 0.206, "dominant_gid": 37, "n_identities": 16, "switches": 135}
+-{"window": "e6_44_60", "version": "v2_2", "player": "#43", "gt_frames": 1788, "observed_coverage": 0.934, "id_purity": 0.285, "dominant_gid": 25, "n_identities": 12, "switches": 69}
+-{"window": "e6_44_60", "version": "vSAM3", "player": "ref_1", "gt_frames": 826, "observed_coverage": 0.952, "id_purity": 0.34, "dominant_gid": 23, "n_identities": 11, "switches": 25}
+-{"window": "e6_44_60", "version": "vSAM3", "player": "#11", "gt_frames": 1744, "observed_coverage": 0.911, "id_purity": 0.492, "dominant_gid": 2, "n_identities": 20, "switches": 81}
+-{"window": "e6_44_60", "version": "vSAM3", "player": "#6", "gt_frames": 1742, "observed_coverage": 0.936, "id_purity": 0.383, "dominant_gid": 1, "n_identities": 22, "switches": 132}
+-{"window": "e6_44_60", "version": "vSAM3", "player": "#22", "gt_frames": 1673, "observed_coverage": 0.928, "id_purity": 0.289, "dominant_gid": 6, "n_identities": 21, "switches": 118}
+-{"window": "e6_44_60", "version": "vSAM3", "player": "#43", "gt_frames": 1788, "observed_coverage": 0.917, "id_purity": 0.439, "dominant_gid": 12, "n_identities": 19, "switches": 93}
+-{"window": "e6_44_60", "version": "vSAM3_solved", "player": "ref_1", "gt_frames": 826, "observed_coverage": 0.952, "id_purity": 0.34, "dominant_gid": 6, "n_identities": 11, "switches": 25}
+-{"window": "e6_44_60", "version": "vSAM3_solved", "player": "#11", "gt_frames": 1744, "observed_coverage": 0.911, "id_purity": 0.492, "dominant_gid": 2, "n_identities": 20, "switches": 81}
+-{"window": "e6_44_60", "version": "vSAM3_solved", "player": "#6", "gt_frames": 1742, "observed_coverage": 0.936, "id_purity": 0.383, "dominant_gid": 16, "n_identities": 22, "switches": 132}
+-{"window": "e6_44_60", "version": "vSAM3_solved", "player": "#22", "gt_frames": 1673, "observed_coverage": 0.928, "id_purity": 0.289, "dominant_gid": 20, "n_identities": 21, "switches": 118}
+-{"window": "e6_44_60", "version": "vSAM3_solved", "player": "#43", "gt_frames": 1788, "observed_coverage": 0.917, "id_purity": 0.439, "dominant_gid": 23, "n_identities": 18, "switches": 93}
+-{"window": "e6_44_60", "version": "vS2", "player": "ref_1", "gt_frames": 826, "observed_coverage": 0.907, "id_purity": 0.449, "dominant_gid": 533, "n_identities": 15, "switches": 62}
+-{"window": "e6_44_60", "version": "vS2", "player": "#11", "gt_frames": 1744, "observed_coverage": 0.889, "id_purity": 0.651, "dominant_gid": 0, "n_identities": 23, "switches": 229}
+-{"window": "e6_44_60", "version": "vS2", "player": "#6", "gt_frames": 1742, "observed_coverage": 0.895, "id_purity": 0.31, "dominant_gid": 5, "n_identities": 28, "switches": 349}
+-{"window": "e6_44_60", "version": "vS2", "player": "#22", "gt_frames": 1673, "observed_coverage": 0.893, "id_purity": 0.293, "dominant_gid": 2, "n_identities": 28, "switches": 310}
+-{"window": "e6_44_60", "version": "vS2", "player": "#43", "gt_frames": 1788, "observed_coverage": 0.815, "id_purity": 0.206, "dominant_gid": 9, "n_identities": 22, "switches": 261}
+-{"window": "e6_44_60", "version": "vMT", "player": "ref_1", "gt_frames": 826, "observed_coverage": 0.937, "id_purity": 0.518, "dominant_gid": 64, "n_identities": 17, "switches": 34}
+-{"window": "e6_44_60", "version": "vMT", "player": "#11", "gt_frames": 1744, "observed_coverage": 0.902, "id_purity": 0.518, "dominant_gid": 2, "n_identities": 20, "switches": 81}
+-{"window": "e6_44_60", "version": "vMT", "player": "#6", "gt_frames": 1742, "observed_coverage": 0.917, "id_purity": 0.18, "dominant_gid": 12, "n_identities": 27, "switches": 170}
+-{"window": "e6_44_60", "version": "vMT", "player": "#22", "gt_frames": 1673, "observed_coverage": 0.913, "id_purity": 0.187, "dominant_gid": 7, "n_identities": 20, "switches": 131}
+-{"window": "e6_44_60", "version": "vMT", "player": "#43", "gt_frames": 1788, "observed_coverage": 0.914, "id_purity": 0.199, "dominant_gid": 55, "n_identities": 25, "switches": 103}
+-{"window": "c2a_300_60", "version": "v2", "player": "#3W", "gt_frames": 1770, "observed_coverage": 0.9, "id_purity": 0.341, "dominant_gid": 1, "n_identities": 15, "switches": 67}
+-{"window": "c2a_300_60", "version": "v2", "player": "#3B", "gt_frames": 1795, "observed_coverage": 0.884, "id_purity": 0.31, "dominant_gid": 27, "n_identities": 13, "switches": 53}
+-{"window": "c2a_300_60", "version": "v2", "player": "#5B", "gt_frames": 1685, "observed_coverage": 0.629, "id_purity": 0.246, "dominant_gid": 19, "n_identities": 16, "switches": 58}
+-{"window": "c2a_300_60", "version": "v2_2", "player": "#3W", "gt_frames": 1770, "observed_coverage": 0.741, "id_purity": 0.423, "dominant_gid": 1, "n_identities": 14, "switches": 75}
+-{"window": "c2a_300_60", "version": "v2_2", "player": "#3B", "gt_frames": 1795, "observed_coverage": 0.814, "id_purity": 0.462, "dominant_gid": 7, "n_identities": 13, "switches": 47}
+-{"window": "c2a_300_60", "version": "v2_2", "player": "#5B", "gt_frames": 1685, "observed_coverage": 0.897, "id_purity": 0.479, "dominant_gid": 6, "n_identities": 16, "switches": 56}
+-{"window": "c2a_300_60", "version": "vSAM3", "player": "#3W", "gt_frames": 1770, "observed_coverage": 0.698, "id_purity": 0.419, "dominant_gid": 9, "n_identities": 19, "switches": 83}
+-{"window": "c2a_300_60", "version": "vSAM3", "player": "#3B", "gt_frames": 1795, "observed_coverage": 0.714, "id_purity": 0.343, "dominant_gid": 44, "n_identities": 17, "switches": 66}
+-{"window": "c2a_300_60", "version": "vSAM3", "player": "#5B", "gt_frames": 1685, "observed_coverage": 0.847, "id_purity": 0.321, "dominant_gid": 37, "n_identities": 21, "switches": 63}
+-{"date": "2026-07-10", "window": "e6fba750_44_60", "method": "reseed-on-drift + xcam correction", "metric": "strict all-angles vs GT (IoU>=0.3)", "players": {"#11": 0.97, "#22": 0.83, "#43": 0.85, "#6": 0.86}, "mean_all_angles": 0.88, "fused": {"#11": 1.0, "#22": 0.89, "#43": 0.93, "#6": 0.93}, "masklets": "runs/sam3_players_reseed", "ledger": "sam3xcam_e6fba750_44_60.json"}
+-{"date": "2026-07-10", "window": "e6fba750_44_60", "method": "HYBRID (ByteTrack + jersey claims, no SAM3) + xcam", "metric": "strict all-angles vs GT (IoU>=0.3)", "players": {"#11": 0.9, "#22": 0.72, "#43": 0.7, "#6": 0.79}, "mean_all_angles": 0.78, "cpu_only": true, "tracking_cost_usd": 0, "compare": "SAM3+xcam mean 0.88 on same GT"}
+-{"date": "2026-07-10", "window": "e6fba750_44_60", "method": "hybrid + xcam + FINE-TUNED KPR (flywheel cycle 1: trained on c2a auto-labels only)", "metric": "strict all-angles vs GT", "players": {"#11": 0.92, "#22": 0.82, "#43": 0.74, "#6": 0.85}, "mean_all_angles": 0.832, "pilot_same_kit": 0.75, "pilot_same_kit_zeroshot": 0.69, "train_cost_usd": 2.5, "compare": "zero-shot stack 0.823; SAM3 0.88"}
+-{"date": "2026-07-10", "window": "c2a354fe_300_60", "method": "BLIND VALIDATION: hybrid + pose + kit-aware xcam (offsets corrected -4/-3/-4 -> +1/+2/-1)", "metric": "strict all-angles vs GT", "players": {"#3B": 0.73, "#3W": 0.86, "#5B": 0.83}, "mean_all_angles": 0.81, "fused": {"#3B": 0.76, "#3W": 0.9, "#5B": 0.88}, "notes": "root cause of earlier collapse was sync offsets (450cm->77cm cross-cam agreement); kit-aware identity fixed dual numbers (#3B 47->73, #3W 64->86)", "compare": "tuned game e6: 83.2%"}
+-{"date": "2026-07-11", "window": "e6fba750_44_60", "method": "LEVEL-2 GATE: yolo11s dets swapped in, same pipeline (hybrid+ftKPR+coverage), GT graded vs RF-DETR-referenced boxes", "metric": "strict all-angles vs GT", "players": {"#11": 0.91, "#22": 0.82, "#43": 0.73, "#6": 0.81}, "mean_all_angles": 0.818, "compare": "RF-DETR same config 0.832 (-1.4pts); Level-1 valid: yolo11s mAP50 0.926/50-95 0.813 vs RF-DETR 0.932/0.854; ball -3.7 mAP50", "note": "first gate run scored 26% \u2014 artifact: GT stores det INDICES vs RF-DETR lists; fixed via GT_DETS_DIR"}
+-{"date": "2026-07-11", "window": "f66eb3b2_race_60 (blind game)", "method": "LEVEL-3 RACE: one A10G, identical frames @1280, sequential lanes, warmup excluded", "results": {"rfdetr_s_fp16": {"fps": 24.4, "game_min": 196.5, "usd": 3.97}, "yolo11s_fp16": {"fps": 67.0, "game_min": 71.6, "usd": 1.45}}, "note": "yolo11s 2.7x faster; yolo11m lane pending; both lanes python-loop fp16 (TensorRT lifts both, relative gap is the signal)"}
+-{"date": "2026-07-11", "window": "e6fba750_44_60", "method": "LEVEL-2 GATE: yolo11m dets swapped in, same pipeline, GT_DETS_DIR grading", "metric": "strict all-angles vs GT", "players": {"#11": 0.9, "#22": 0.8, "#43": 0.69, "#6": 0.81}, "mean_all_angles": 0.8, "compare": "RF-DETR 0.832, yolo11s 0.818. KEY FINDING: mAP does NOT order pipeline outcome \u2014 11m beats both on mAP50 (0.935) yet tracks worst; #43 (far court) -5 vs RF-DETR", "level1": {"player": 0.97, "referee": 0.96, "ball": 0.874, "all50": 0.935, "all5095": 0.825}}
+-{"date": "2026-07-11", "window": "c2a354fe_300_60 (blind game, GT minute)", "method": "E2E DETECTOR RACE: raw video -> full pipeline per lane (detect/OCR/pose/kits/track/xcam all from lane's own detector), zero cross-lane reuse; graded strict+fused vs GT via GT_DETS_DIR; timings on A10G, accuracy scored locally (kit-copy fix)", "lanes": {"rfdetr_s_fp16": {"strict": 0.81, "fused": 0.856, "e2e_s": 1765, "det_fps": 24.5, "reads": 6191}, "yolo26s": {"strict": 0.789, "fused": 0.846, "e2e_s": 1568, "det_fps": 63.4, "reads": 6983}, "yolo11s": {"strict": 0.766, "fused": 0.844, "e2e_s": 1578, "det_fps": 67.2, "reads": 6857}, "yolo11m": {"strict": 0.762, "fused": 0.816, "e2e_s": 1560, "det_fps": 60.3, "reads": 6756}}, "per_player_strict_fused": {"rfdetr": {"#3W": [0.853, 0.884], "#3B": [0.753, 0.826], "#5B": [0.823, 0.858]}, "yolo26s": {"#3W": [0.888, 0.941], "#3B": [0.711, 0.753], "#5B": [0.768, 0.845]}, "yolo11s": {"#3W": [0.84, 0.899], "#3B": [0.677, 0.757], "#5B": [0.781, 0.877]}, "yolo11m": {"#3W": [0.849, 0.892], "#3B": [0.663, 0.685], "#5B": [0.773, 0.871]}}, "verdict": "RF-DETR stays accuracy reference (wins strict+fused); yolo26s = edge/live candidate (best YOLO, fused -1.0pt, 2.6x det speed, DeepStream drop-in, most reads). Detection now ~7% of e2e time; OCR+kits ~80% -> next optimization target. e6 Level-2 gate numbers (81.8/80.0) SUPERSEDED: shared RF-DETR-derived anchors contaminated them (user caught it).", "notes": "yolo26s Level-1 valid: player .960/ref .948/ball .855/all .921-.812. Prior e2e attempt lost to onnxruntime-gpu cu13 mismatch (~$0.30). Race cost ~$2.4 total."}
+-{"date": "2026-07-11", "window": "e6fba750_44_60", "method": "RE-BASELINE on yolo26s (production detector): 26s dets -> pose -> Phase-1 batched anchors (stride 1, 9461 events, +11% vs RF-DETR's 8522; #43 +55%) -> hybrid -> ft-KPR full stack; GT_DETS_DIR grading", "metric": "strict all-angles + fused vs GT", "players_strict": {"#11": 0.94, "#22": 0.78, "#43": 0.77, "#6": 0.77}, "players_fused": {"#11": 0.96, "#22": 0.83, "#43": 0.79, "#6": 0.84}, "mean_strict": 0.815, "mean_fused": 0.855, "compare": "RF-DETR full stack 83.2 strict (-1.7). Stride matters: same chain at stride-2 scored 78.8 (-2.7 from density alone) -> heartbeat sweep must treat read budget as a tunable. #11 +2 and #43 +3 vs RF-DETR; #6 -8 is THE outlier (reads +14% yet worse -> detection/claim issue in #6's zone, diagnose). Phase-1 stack: anchors 140s for stride-1 (old code ~35min).", "notes": "new champion pair on production detector: 81.5/85.5"}
+-{"date": "2026-07-11", "window": "c2a354fe_300_60 (26s dets)", "method": "PHASE-2 SWEEP: dense stride-1 vs triggered OCR (state machine: unclaimed/heartbeat/contact-burst/contradiction), GT_DETS_DIR grading", "results": {"dense_s1": {"strict": 0.831, "fused": 0.892, "crops": 39966, "reads": 14108}, "trig_h30": {"strict": 0.802, "fused": 0.879, "crops_pct": 78}, "trig_h60": {"strict": 0.773, "fused": 0.842, "crops_pct": 78}, "trig_h120": {"strict": 0.773, "fused": 0.842, "crops_pct": 78}}, "verdict": "DENSE-S1 = new c2a champion 0.831/0.892 (26s + density beats RF-DETR lane 0.810/0.856). Triggered FAILS offline gate (-2.9 best); selection dominated by unclaimed+contact (heartbeat irrelevant). ADOPTED: dense-s1 offline everywhere (188s/game-min post-Phase-1); triggered = LIVE profile only, tune on AGX.", "note": "third consistent density datapoint (e6 s1/s2 -2.7; c2a s1/s2; c2a trig). First sweep run scored 0.22 across the board - forgot GT_DETS_DIR (the classic artifact), rerun fixed."}
+-{"date": "2026-07-11", "window": "c2a354fe_300_60 (26s dets)", "method": "PHASE-2 stride-2 DETECTION gate: even frames kept, odd interpolated (IoU-matched, best-case simulation from full cache), dense-s1 anchors, GT_DETS_DIR grading", "result": {"strict": 0.821, "fused": 0.862}, "verdict": "FAILS gate vs full-det 0.831/0.892 (-1.0/-3.0). REJECTED offline. Pose-subset experiment SKIPPED by reasoning: xcam can pick ANY detection near truth; untracked dets without pose lose sole07 projection exactly in wrong-pick recovery. PHASE-2 OFFLINE CONCLUSION: every work-reduction fails; full density + full rate win everywhere; offline speed path = Phase-3 engine ports. Work-reduction toolset = LIVE (AGX) profile only."}
+-{"date": "2026-07-12", "window": "e6fba750 FULL GAME (55.7 min, 6 chunks)", "method": "EVENTS v1.5: possession (ball-player proximity, x-cam vote, hysteresis, sticky) + attribution at GT play timestamps; zones from court config (3PT model-validated, 4PT paint-fit); identity via full 26s stack per chunk", "dev_chunks_1_4": {"who": "80/161 (50%)", "zone": "59/96 (61%)"}, "heldout_chunks_5_6": {"who": "26/58 (45%)", "zone": "20/35 (57%)"}, "full_game": {"who": "106/219 (48%)", "zone": "79/131 (60%)"}, "by_type_highlights": "FT ~solved (13/15 who, 14/14 zone dev); REBOUND fixed by forward window; 4PT zone under-ranged (sparse possession at deep release)", "ceiling": "ball detection recall 3-12%/frame caps possession -> WHO. Interp refuted (2/9->0/9 sandbox sweep).", "cost": "events workstream total ~$15 (incl $3.4 wait-bug + $0.6+$0.5 anchors patches)", "next_fork": "ball-detector retrain (labels + 4th-class) vs phase-2 possession-change rules"}
+-{"date": "2026-07-12", "window": "e6fba750 FULL GAME (219 plays)", "method": "EVENTS ball-detector upgrade: pooled all-angle ball specialist (yolo26s, far+near+consolidated 7.5k boxes, e6 held out) -> mAP50 0.953 (vs 0.855); ball frame coverage 1-8% -> 47-74% per cam", "events_result": {"who_old_ball": "106/219 (48.4%)", "who_new_ball": "107/219 (48.9%)", "zone_old": "79/131 (60.3%)", "zone_new": "82/133 (61.7%)"}, "KEY_FINDING": "Ball coverage improved 10-40x but WHO moved +0.5pt only. Ball was NOT the WHO bottleneck. Diagnosis: shooter identity-track present at shot in 87% of shots AND ball now visible, yet WHO=49% -> the bottleneck is the possession->shooter ATTRIBUTION LOGIC (nearest-ball-in-window picks wrong nearby player). v1.6 'last-hard-holder' attribution REFUTED (48.9->32%).", "banked": "ball specialist is durable infra (runs/ball_yolo26s_fetch), reusable, no annotation; removes ball as a future limiter", "next_lever": "attribution model (release detection via ball trajectory / possession-change), NOT more ball data, NOT annotation. Ceiling for WHO ~ tracking accuracy 81-85% if attribution approached it."}
+-{"date": "2026-07-12", "window": "e6fba750 FULL GAME (219 plays) \u2014 ATTRIBUTION STUDY", "methods_tested": {"v1.5 majority-possession": "48.9% WHO", "v2 possession-runs": "46.1% WHO", "v1.6 last-hard-holder": "32% WHO"}, "finding": "Attribution-logic sophistication does NOT move WHO \u2014 3 methods all <=49%. Diagnostic: of WHO-wrong shots only 37% have the picked player in the right ZONE (~chance), so wrong picks are genuinely wrong PLAYERS not near the shooter, not identity-relabels. Root: the possession signal itself (nearest-player-to-ball) is a weak ball-handler indicator when players cluster.", "conclusion": "Simple possession-proximity attribution is tapped out at ~49% WHO. NOT improvable by ball data (banked, done), annotation (won't help), or logic tweaks (tested). Genuinely-next levers: (1) integrate fusion-v2/shot-detection shot-ORIGIN data -> attribute to identity nearest shot origin; (2) learned possession model (needs per-frame possession GT); (3) raise full-game IDENTITY quality (core tracking) which caps everything.", "value_shipped": "zone 62%, free throws ~solved, WHO 49% (>>chance ~8%); ball specialist 0.953 mAP durable"}
+-{"date": "2026-07-12", "window": "e6fba750_44_60", "method": "KPR FLYWHEEL CYCLE 2: fine-tune on c2a+f66 auto-labels (7.7k crops/45 ids vs cycle-1 c2a-only 3k/14; e6 held out), yolo26s dense-s1 pipeline", "players_strict": {"#11": 0.93, "#22": 0.8, "#43": 0.77, "#6": 0.77}, "mean_strict": 0.817, "mean_fused": 0.862, "compare": "cycle-1 champion 81.5/85.5 -> cycle-2 81.7/86.2 (+0.2 strict/+0.7 fused). #22 (same-number-opponent, hardest) +2. DIMINISHING RETURNS: cycle-1 gave +0.9, cycle-2 +0.2 strict -> flywheel near ceiling, no cycle-3 expected to help.", "adopted": "cycle-2 weights now production (kpr_uball_ft.pth.tar); trained on more diverse data = more robust. train cost ~$2.5", "traps_avoided": "stale-S3-results-key (fetched Jul-10 cycle-1 by mistake, caught via instance-state gating); premature mid-write dataset copy; PK-sampler healthy (loss 7.24->1.98, non-zero batches)"}
+diff --git a/scripts/render_fullgame_grid.py b/scripts/render_fullgame_grid.py
+index e8b5c45..b65d276 100644
+--- a/scripts/render_fullgame_grid.py
++++ b/scripts/render_fullgame_grid.py
+@@ -115,6 +115,14 @@ def main() -> int:
+     ap.add_argument("--plays", default=None)
+     ap.add_argument("--tracks-glob", default=None)
+     ap.add_argument("--srcdir", default="runs/event_demo")
++    ap.add_argument("--ring", action="store_true",
++                    help="draw a glowing floor ring under the ball holder "
++                         "(follows the same fused identity across all 4 angles)")
++    ap.add_argument("--ring-mov",
++                    default="/home/akhilesh/Desktop/Uball/desgin/Circle.mov",
++                    help="alpha Circle.mov used for the ring")
++    ap.add_argument("--keep-holder-box", action="store_true",
++                    help="with --ring, also keep the thick yellow holder box")
+     a = ap.parse_args()
+     game = a.game
+     OFFS = GAME_OFFS[game]
+@@ -186,9 +194,22 @@ def main() -> int:
+          "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-y", str(outp)],
+         stdin=subprocess.PIPE)
+ 
++    # ring overlay (holder = a cross-camera fused identity -> same ring in every angle)
++    ring_ov, ring_n, ring_fps, ring_stab = None, 0, 24.0, {}
++    if a.ring:
++        from ring_overlay import (RingStabilizer, build_overlay_cache,
++                                   draw_ring_box, occlusion_from_boxes)
++        cache = str(outp.parent / "ring_cache.npy")
++        outp.parent.mkdir(parents=True, exist_ok=True)
++        ring_n, ring_fps = build_overlay_cache(a.ring_mov, cache)
++        ring_ov = np.load(cache, mmap_mode="r")
++        ring_stab = {ang: RingStabilizer() for ang in ANGLES}
++        print(f"ring: {ring_n} Circle.mov frames loaded", flush=True)
++
+     trail = {ang: deque(maxlen=TRAIL_N) for ang in ANGLES}
+     canvas = np.zeros((H, W, 3), np.uint8)
+     frames = {}
++    prev_holder = None
+     import time
+     t_start = time.time()
+     for fi in range(n_frames):
+@@ -197,6 +218,14 @@ def main() -> int:
+         canvas[:] = 0
+         canvas[:, GRID_W:] = (24, 24, 28)
+         holder = hold_at.get(f)
++        # possession switch -> snap the ring onto the new holder. apply()'s own
++        # snap test compares ground-locked Y, which the vertical lock holds near
++        # the old value, so a switch to a further-away player never trips it and
++        # the ring slides across the floor (sitting on the wrong player meanwhile).
++        if holder != prev_holder:
++            for stab in ring_stab.values():
++                stab.reset()
++            prev_holder = holder
+         for gi, ang in enumerate(ANGLES):
+             cap = caps[ang]
+             if cap is None:
+@@ -218,18 +247,36 @@ def main() -> int:
+             gf = target
+             # identity streams: every player, name above box
+             # (boxes are in source 1920x1080 coords; cell is CELL_WxCELL_H)
++            holder_cell_box, cell_boxes = None, []
+             for sid, angs in tracks.items():
+                 box = angs.get(ang, {}).get(gf)
+                 if box is None:
+                     continue
+                 bx1, by1 = int(box[0] / 1920 * CELL_W), int(box[1] / 1080 * CELL_H)
+                 bx2, by2 = int(box[2] / 1920 * CELL_W), int(box[3] / 1080 * CELL_H)
++                cell_boxes.append((bx1, by1, bx2, by2))
+                 is_h = (sid == holder)
++                if is_h:
++                    holder_cell_box = (bx1, by1, bx2, by2)
+                 col = HOLDER_COL if is_h else TEAM_COL.get(teamof.get(sid))
+-                cv2.rectangle(cell, (bx1, by1), (bx2, by2), col, 3 if is_h else 1)
++                # with --ring the ring marks the holder; suppress the thick box
++                # (unless --keep-holder-box) but keep every name label.
++                draw_box = not (is_h and ring_ov is not None and not a.keep_holder_box)
++                if draw_box:
++                    cv2.rectangle(cell, (bx1, by1), (bx2, by2), col, 3 if is_h else 1)
+                 cv2.putText(cell, label.get(sid, sid), (bx1, max(10, by1 - 3)),
+                             cv2.FONT_HERSHEY_SIMPLEX, 0.36, col,
+                             2 if is_h else 1)
++            # glowing floor ring under the fused holder (behind players in front)
++            if ring_ov is not None:
++                if holder_cell_box is not None:
++                    occ = occlusion_from_boxes(cell_boxes, holder_cell_box, cell.shape)
++                    oidx = int(gf / FPS * ring_fps) % ring_n
++                    draw_ring_box(cell, holder_cell_box,
++                                  np.ascontiguousarray(ring_ov[oidx]),
++                                  stab=ring_stab[ang], occ=occ)
++                else:
++                    ring_stab[ang].reset()
+             # hoop boxes
+             for b in ballz[ang].get((gf, 1), []):
+                 cv2.rectangle(cell, (int(b[0] / 1920 * CELL_W), int(b[1] / 1080 * CELL_H)),
+diff --git a/scripts/ring_overlay.py b/scripts/ring_overlay.py
+new file mode 100644
+index 0000000..8e1a672
+--- /dev/null
++++ b/scripts/ring_overlay.py
+@@ -0,0 +1,178 @@
++#!/usr/bin/env python3
++"""Glowing floor-ring overlay for the full-game renderer.
++
++Draws the alpha `Circle.mov` ring under the ball holder. Unlike the standalone
++`desgin` renderer (which had per-frame segmentation masks), here the holder is a
++CROSS-CAMERA FUSED identity and we only have his BOX per camera -- so the ring is
++anchored to the box's bottom-centre (feet) and sized from the box width. The
++holder id is the same global stream across all four angles, so the ring lands on
++the same physical player in every view automatically.
++
++Self-contained (no dependency on the desgin repo): Circle.mov -> alpha cache,
++a One-Euro stabiliser with vertical ground-lock (so the ring stays planted when
++the holder jumps), and box-based ring compositing.
++"""
++import json
++from pathlib import Path
++
++import cv2
++import numpy as np
++
++_TWO_PI = 2.0 * np.pi
++
++
++# ------------------------------ Circle.mov cache ---------------------------
++def build_overlay_cache(mov_path, cache_path, max_dim=640):
++    """Decode the alpha .mov ONCE into a stacked BGRA .npy. Returns (n, fps)."""
++    cache_path = str(cache_path)
++    meta = cache_path + ".json"
++    if Path(cache_path).exists() and Path(meta).exists():
++        m = json.loads(Path(meta).read_text())
++        return m["n"], m["fps"]
++    import av  # noqa: PLC0415
++    frames = []
++    with av.open(str(mov_path)) as container:
++        stream = container.streams.video[0]
++        fps = float(stream.average_rate) if stream.average_rate else 30.0
++        for frame in container.decode(stream):
++            bgra = cv2.cvtColor(frame.to_ndarray(format="rgba"), cv2.COLOR_RGBA2BGRA)
++            h, w = bgra.shape[:2]
++            if max(h, w) > max_dim:
++                s = max_dim / max(h, w)
++                bgra = cv2.resize(bgra, (int(w * s), int(h * s)), interpolation=cv2.INTER_AREA)
++            frames.append(bgra)
++    np.save(cache_path, np.stack(frames, 0))
++    Path(meta).write_text(json.dumps({"n": len(frames), "fps": fps}))
++    return len(frames), fps
++
++
++# ------------------------------ Stabiliser ---------------------------------
++class _OneEuro:
++    def __init__(self, mincutoff, beta, dcutoff=1.0):
++        self.mincutoff, self.beta, self.dcutoff = mincutoff, beta, dcutoff
++        self.x_prev = None
++        self.dx_prev = 0.0
++
++    @staticmethod
++    def _alpha(cutoff):
++        tau = 1.0 / (_TWO_PI * cutoff)
++        return 1.0 / (1.0 + tau)
++
++    def reset(self, x=None):
++        self.x_prev = x
++        self.dx_prev = 0.0
++
++    def filter(self, x):
++        if self.x_prev is None:
++            self.x_prev = x
++            return x
++        dx = x - self.x_prev
++        a_d = self._alpha(self.dcutoff)
++        dx_hat = a_d * dx + (1.0 - a_d) * self.dx_prev
++        a = self._alpha(self.mincutoff + self.beta * abs(dx_hat))
++        x_hat = a * x + (1.0 - a) * self.x_prev
++        self.x_prev, self.dx_prev = x_hat, dx_hat
++        return x_hat
++
++
++class RingStabilizer:
++    """One-Euro smoothing of the ring's foot centre + width, plus a vertical
++    ground-lock (foot-Y may fall freely but rises slowly) so a jumping holder's
++    ring stays on the floor. A move beyond `snap_dist` snaps instead of sliding
++    (possession switch / reappearance). Call reset() on frames with no ring."""
++
++    def __init__(self, mincutoff=0.05, beta=0.007, snap_dist=90.0,
++                 ground_down=0.5, ground_max_up=2.0, ground_release=15):
++        self.snap_dist = snap_dist
++        self.ground_down = ground_down
++        self.ground_max_up = ground_max_up
++        self.ground_release = ground_release
++        self.fx = _OneEuro(mincutoff, beta)
++        self.fy = _OneEuro(mincutoff, beta)
++        self.fw = _OneEuro(mincutoff, beta)
++        self.cx = self.cy = None
++        self.ground_y = None
++        self.rising = 0
++
++    def reset(self):
++        self.fx.reset(); self.fy.reset(); self.fw.reset()
++        self.cx = self.cy = None
++        self.ground_y = None
++        self.rising = 0
++
++    def _lock(self, cy):
++        if self.ground_y is None:
++            self.ground_y = float(cy); self.rising = 0
++        elif cy >= self.ground_y:
++            self.ground_y += self.ground_down * (cy - self.ground_y); self.rising = 0
++        else:
++            self.rising += 1
++            rate = self.ground_max_up
++            if self.rising > self.ground_release:
++                rate = max(self.ground_max_up, self.ground_y - cy)
++            self.ground_y = max(float(cy), self.ground_y - rate)
++        return self.ground_y
++
++    def apply(self, cx, cy, w):
++        cyg = self._lock(cy)
++        if self.cx is not None and abs(cx - self.cx) + abs(cyg - self.cy) > self.snap_dist:
++            self.fx.reset(cx); self.fy.reset(cyg); self.fw.reset(w)
++            self.ground_y = float(cy)
++            self.cx, self.cy = float(cx), float(cyg)
++            return int(round(cx)), int(round(cyg)), float(w)
++        self.cx = self.fx.filter(cx)
++        self.cy = self.fy.filter(cyg)
++        return int(round(self.cx)), int(round(self.cy)), self.fw.filter(w)
++
++
++# ------------------------------ Ring drawing -------------------------------
++def _alpha_composite(bg, ov, cx, cy, occ=None):
++    oh, ow = ov.shape[:2]
++    bh, bw = bg.shape[:2]
++    x1, y1 = cx - ow // 2, cy - oh // 2
++    x2, y2 = x1 + ow, y1 + oh
++    fx1, fy1, fx2, fy2 = max(x1, 0), max(y1, 0), min(x2, bw), min(y2, bh)
++    if fx1 >= fx2 or fy1 >= fy2:
++        return
++    ox1, oy1 = fx1 - x1, fy1 - y1
++    roi = bg[fy1:fy2, fx1:fx2]
++    o = ov[oy1:oy1 + (fy2 - fy1), ox1:ox1 + (fx2 - fx1)]
++    alpha = o[:, :, 3:4] / 255.0 if o.shape[2] == 4 else 1.0
++    if occ is not None:
++        alpha = alpha * (occ[fy1:fy2, fx1:fx2] == 0)[:, :, None]
++    roi[:] = (1.0 - alpha) * roi + alpha * o[:, :, :3]
++
++
++def draw_ring_box(cell, box, overlay_img, stab=None, occ=None,
++                  scale=2.2, squash=0.40, feet_lift=0.10,
++                  min_w_far_frac=0.06, min_w_near_frac=0.24):
++    """Draw the ground ring under a holder given his BOX in cell pixels.
++
++    box: (x1,y1,x2,y2) in the cell's coordinate system. The ring sits at the
++    box bottom-centre (feet), width scales with the box, with a proximity floor
++    (nearer the camera -> lower in the cell -> larger ring). `stab` smooths it;
++    `occ` optionally hides it behind foreground boxes.
++    """
++    ch, cw = cell.shape[:2]
++    x1, y1, x2, y2 = (float(v) for v in box)
++    cx, cy, w = (x1 + x2) * 0.5, y2, max(1.0, x2 - x1)
++    if stab is not None:
++        cx, cy, w = stab.apply(cx, cy, w)
++    frac = min(1.0, max(0.0, cy / ch)) if ch else 0.0
++    min_w = (min_w_far_frac + (min_w_near_frac - min_w_far_frac) * frac) * cw
++    ring_w = max(int(round(min_w)), int(round(w * scale)))
++    ring_h = max(1, int(round(overlay_img.shape[0] * (ring_w / overlay_img.shape[1]) * squash)))
++    resized = cv2.resize(overlay_img, (ring_w, ring_h), interpolation=cv2.INTER_AREA)
++    _alpha_composite(cell, resized, int(round(cx)), int(round(cy - ring_h * feet_lift)), occ)
++
++
++def occlusion_from_boxes(boxes, holder_box, shape):
++    """Mask of players standing IN FRONT of the holder (lower foot line), so the
++    ring tucks behind them. Coarse (box-level) but keeps depth ordering sane."""
++    occ = np.zeros(shape[:2], np.uint8)
++    hy2 = holder_box[3]
++    for b in boxes:
++        if b is holder_box or b[3] <= hy2:      # only players closer to camera
++            continue
++        cv2.rectangle(occ, (int(b[0]), int(b[1])), (int(b[2]), int(b[3])), 255, -1)
++    return occ
