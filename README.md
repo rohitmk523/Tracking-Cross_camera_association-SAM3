@@ -1,95 +1,75 @@
-# Cross-Camera Basketball Tracking — 4-Angle Fusion, Possession & Events
+# Cross-Camera Basketball Tracking — Ball Possession (WHO)
 
-Production multi-camera basketball understanding on a fixed 4-camera rig
-(FL / FR / NL / NR): per-camera detection → jersey-anchored identity
-tracking → **cross-camera fusion into one identity per player** → a
-**ball-first possession state machine** (who holds the ball, every frame)
-→ shot / rebound / turnover **events scored against human ground truth**,
-plus 4-angle review renders that make every layer visible.
+Multi-camera basketball tracking on a fixed 4-camera rig (FL/FR/NL/NR):
+per-camera detection → jersey-anchored identity tracking → **cross-camera
+fusion into one identity per player** → a **ball-first possession state
+machine** that knows **who has the ball at every frame** — rendered as a
+glowing ring under the holder, correct in all four angles simultaneously.
 
-> New here? Read **[docs/GUIDE_POSSESSION_PIPELINE.md](docs/GUIDE_POSSESSION_PIPELINE.md)**
-> — the hands-on walkthrough from raw game videos to "marker on the ball
-> holder in all 4 angles".
+That is the whole product right now. Shot detection, make/miss and event
+assembly were deliberately removed from the working pipeline (2026-08-01
+possession-core pivot — recoverable from git history).
 
-## The production pipeline (current, 2026-07)
+> **Start here: [`game_plan.md`](game_plan.md)** — the current mission and
+> plays. Then [`docs/GUIDE_POSSESSION_PIPELINE.md`](docs/GUIDE_POSSESSION_PIPELINE.md)
+> for the hands-on runbook.
+
+## The pipeline
 
 ```
-S3 game videos (4 angles, 1080p)
-  └─ AWS prep (GPU): yolo26s detections + RTMPose + jersey anchors    scripts/aws_fullgame_prep_job.py
-  └─ AWS ball job:   ball+hoop specialist cache                       scripts/aws_ballcache_job.py
-LOCAL (CPU):
-  1. camera sync offsets (audio / anchor-geometry sweep)              scripts/sync_anchor_sweep.py, src/uball_cc/fusion/audiosync.py
-  2. kit tags for dual jersey numbers                                 scripts/annotate_anchor_kits.py
-  3. per-camera tracking: ByteTrack + jersey claims                   scripts/hybrid_track.py
-  4. cross-camera identity solve (per player, --pose --carry)         scripts/solve_player_xcam.py
-  5. ball trajectories (Kalman+RTS per camera)                        scripts/ball_traj.py
-  6. BALL-FIRST holder machine → possession timeline                  scripts/ballfirst_who.py
-  7. shot detection + WHO + zones (frozen thresholds)                 scripts/detect_shots.py
-  8. make/miss via frozen P3 transfer                                 scripts/shotdet_p1_adapter.py, scripts/shotdet_transfer_eval.py
-  9. event assembly + rebounds/turnovers                              scripts/assemble_events.py, scripts/detect_possession_events.py
- 10. 4-angle review render (all layers visible)                       scripts/render_fullgame_grid.py
+4 angle videos (1080p)
+  GPU  build_dets_cache_yolo.py     players/referees   (yolo26s @ 1280)
+  GPU  build_ball_cache.py          ball + hoop        (specialist @ 1280, conf .15)
+  GPU  extract_pose.py              ankles (court projection)
+  GPU  extract_jersey_anchors.py    jersey reads = identity ground wire
+  CPU  annotate_anchor_kits.py      kit split for numbers worn by both teams
+  CPU  hybrid_track.py              per-camera ByteTrack + jersey claims
+  CPU  solve_player_xcam.py         cross-camera fusion (--pose --carry)
+  CPU  ball_traj.py → ballfirst_who.py → runs/tracking/ledger/holders_<game>.json
+       render_fullgame_grid.py --ring        ← the deliverable
 ```
 
-Detectors: **yolo26s** (0 player / 1 referee / 2 ball, imgsz 1280) + a
-**ball+hoop specialist** (0 Basketball / 1 Basketball Hoop, imgsz 1280,
-conf 0.15). Jersey identity: number localizer (yolo11n) + PARSeq OCR +
-kit-shade classifier for numbers worn by both teams.
-
-## Current results (blind protocol: thresholds frozen on e6, GT used once)
-
-| metric (of GT shots) | e6 (dev) | c2a (blind) | 2c4 (blind) | 13e1 (blind) |
-|---|---|---|---|---|
-| Shot detected | 94% | 88% | 91% | 89% |
-| WHO (of detected) | 66% | 38% | 62% | 34% |
-| Zone / FT | 79% | 65% | 72% | 45% |
-| Make/miss | 98% | 95% | 89% | 61% |
-| Rebound detection | 93% | 81% | 67% (n=6) | 78% |
-
-Blind-game analyses: [C2A](docs/C2A_BLIND_RESULTS.md) ·
-[2C4](docs/2C4_BLIND_RESULTS.md) · [13E1FFAD](docs/13E1FFAD_BLIND_RESULTS.md).
-The weak columns have measured causes, not mysteries: shared jersey
-numbers across teams (c2a: five duals) and, for 13e1, January footage
-against March-era court calibration.
+For a ~55-min game the GPU stages run on AWS (3 instances in parallel,
+~2.2h wall, ~$9); short clips run fully local on any CUDA GPU. Camera sync
+(`sync_anchor_sweep.py`, audio tools) and **per-era court calibration**
+(`refit_calibration.py`) are the two silent killers — check both before
+trusting fusion on new footage.
 
 ## Repository layout
 
 ```
-scripts/          every pipeline stage + AWS job launchers (self-documenting headers)
-src/uball_cc/     shared library (fusion/homography, audiosync, tracking, detection)
-configs/          games registry (games.json), court zones, per-camera calibration
-data/             (gitignored) rosters, GT plays, gt_players
-runs/             (gitignored) all artifacts: caches, track dumps, ledgers, renders
-docs/             design docs, plans, blind-run reports, session logs
+game_plan.md      the current mission — read first
+scripts/          the 8-stage chain + sync/calibration + AWS & training launchers
+src/uball_cc/     shared library (homography, audiosync, tracking, detection)
+configs/          games registry, per-camera calibration
+data/             (gitignored) rosters, GT plays
+runs/             (gitignored) caches, track dumps, holder ledgers, render sources
+docs/             runbook, design docs, blind-run records, session logs
 ```
 
-Key artifacts per processed game (under `runs/`):
-- `tracking/ledger/holders_<game>.json` — frame-by-frame ball holder (RLE segments)
-- `tracking/ledger/events_v2_<game>.json` + `possession_events_<game>.json`
-- `events_fg_*<tag>/` — per-player per-camera track dumps (the fused identities)
-- `event_demo/fullgame_<game>.mp4` — the 4-angle review video
+Per processed game (`e6fba750`, `c2a354fe`, `2c490f1a`, `13e1ffad` on disk):
+- `runs/tracking/ledger/holders_<game>.json` — frame-by-frame ball holder (RLE)
+- `runs/events_fg_*<tag>/` — fused per-player per-camera boxes
+- `runs/event_demo/fullsrc_<game>_<ANG>.mp4` — low-res render sources
 
-## Docs index
+## Detectors & weights
 
-The numbered docs (`docs/00..15_*.md`) are the original design phase —
-still correct for rig/calibration/eval concepts; superseded in places by
-the hybrid (no-SAM3) pipeline above. Living documents:
+| model | classes | imgsz |
+|---|---|---|
+| `runs/yolo26s-1280-ourdata-v1_fetch/.../best.pt` | player / referee / ball | 1280 |
+| `runs/ball_yolo26s_fetch/.../best.pt` | Basketball / Basketball Hoop | 1280 |
+| `runs/jersey/*` | number localizer + OCR + legibility | — |
 
-| Doc | Contents |
-|---|---|
-| [GUIDE_POSSESSION_PIPELINE](docs/GUIDE_POSSESSION_PIPELINE.md) | **Start here** — end-to-end runbook |
-| [BALL_FIRST_SPEC](docs/BALL_FIRST_SPEC.md) | possession state machine design + verdict log |
-| [WHO_MASTER_PLAN](docs/WHO_MASTER_PLAN.md) | attribution work, every adopt/refute verdict |
-| [STATUS](docs/STATUS.md) | client-facing status + limitations |
-| [SESSION_CONTEXT](docs/SESSION_CONTEXT.md) | operational truths, traps, per-game constants |
-| [14_games_and_clips](docs/14_games_and_clips.md) | game inventory (S3 paths, GT counts) |
+`imgsz=1280` on every predict — the ball is ~6px at the default 640.
+A unified 4-class retrain is planned (game_plan P2).
 
 ## Ground rules
 
-- **Secrets**: nothing sensitive lives in the repo. AWS launchers are gated
-  behind `UBALL_AWS_CREDS_ROTATED=1`; anything that costs money needs
-  approval first (hard cap without it: $5/run).
-- **Licenses**: Ultralytics YOLO is AGPL-3.0-or-commercial; KPR weights are
-  Hippocratic-3.0 — neither ships in a product until cleared.
-- **GT discipline**: blind games are scored once; never tune against them.
-- `data/` and `runs/` are gitignored by design — ask for the artifact drop
-  if you need a processed game.
+- **Secrets**: never committed; AWS launchers gated behind
+  `UBALL_AWS_CREDS_ROTATED=1`; spends need approval (cap $5/run without).
+- **Licenses**: Ultralytics YOLO is AGPL-3.0-or-commercial — cleared before
+  anything ships.
+- **GT discipline**: blind-game ground truth is scored once, never tuned on.
+- `data/` and `runs/` are gitignored — ask for the artifact drop.
+- Removed ≠ destroyed: git history and `~/.Trash/uball_cleanup_2026-08-01/`
+  (with manifest) hold everything the pivot removed.
