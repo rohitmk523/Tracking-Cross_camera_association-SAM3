@@ -54,7 +54,7 @@ def main() -> int:
     a = ap.parse_args()
 
     from uball_cc.tracking.jersey_stack import JerseyStack
-    from uball_cc.tracking.kit_shade import jersey_shade_hv
+    from uball_cc.tracking.kit_shade import jersey_shade_hv, jersey_shade_hv_bbox
 
     key = f"{a.game}_{a.tag}"
     offs = json.loads(a.offsets) if a.offsets else OFFS.get(key)
@@ -104,6 +104,11 @@ def main() -> int:
                     vh = jersey_shade_hv(crop, k - [int(max(0, b[0])), int(max(0, b[1]))], ks)
                     if vh is not None:
                         ev["shade"] = round(vh[0], 1)
+                else:
+                    vh = jersey_shade_hv_bbox(crop)
+                    if vh is not None:
+                        ev["shade"] = round(vh[0], 1)
+                        ev["hue"] = round(vh[1], 1)
                         ev["hue"] = round(vh[1], 1)
                 anchors.append(ev)
             pend.clear()

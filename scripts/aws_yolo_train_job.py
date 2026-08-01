@@ -22,17 +22,17 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "scripts"))
 import aws_sam3_job as J   # noqa: E402
 
-DATASET = REPO / "data/detect_consolidated"
+DATASET = REPO / "data/detect_consolidated"   # default; override with --dataset-dir
 DATASET_KEY = f"{J.PREFIX}/detect_consolidated.tar.gz"
 
 
-def userdata(dataset_url, results_url, log_url, model, batch, epochs) -> str:
+def userdata(dataset_url, results_url, log_url, model, batch, epochs, dsname, failsafe) -> str:
     return f"""#!/bin/bash
 exec > /var/log/yolo.log 2>&1
 export HOME=/root PYTHONUNBUFFERED=1 YOLO_CONFIG_DIR=/tmp/Ultralytics
 LOG_URL="{log_url}"
 (while true; do sleep 30; curl -s -T /var/log/yolo.log "$LOG_URL" >/dev/null 2>&1 || true; done) &
-(sleep 12600; echo "[boot] 3.5h failsafe shutdown"; shutdown -h now) &
+(sleep {failsafe}; echo "[boot] failsafe shutdown"; shutdown -h now) &
 PYBIN=""
 for P in /opt/pytorch/bin/python /usr/bin/python3; do
   if [ -x "$P" ] && $P -c "import torch,sys;sys.exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then PYBIN=$P; break; fi
@@ -45,7 +45,7 @@ $PYBIN -c "import torch; assert torch.cuda.is_available(); print('torch OK')"
 mkdir -p /work && cd /work
 echo "[boot] downloading dataset..."
 curl -s -L "{dataset_url}" -o d.tgz && tar xzf d.tgz && rm d.tgz
-sed -i "s|^path:.*|path: /work/detect_consolidated|" detect_consolidated/data.yaml
+sed -i "s|^path:.*|path: /work/{dsname}|" {dsname}/data.yaml
 # incremental best.pt uploader
 (while true; do sleep 600
    B=$(find runs -name best.pt 2>/dev/null | head -1)
@@ -54,11 +54,11 @@ done) &
 $PYBIN - <<'PY'; RC=$?
 from ultralytics import YOLO
 m = YOLO("{model}.pt")
-m.train(data="/work/detect_consolidated/data.yaml", imgsz=1280, epochs={epochs}, batch={batch},
+m.train(data="/work/{dsname}/data.yaml", imgsz=1280, epochs={epochs}, batch={batch},
         cos_lr=True, patience=25, cache="disk", mosaic=0.5, close_mosaic=15,
         copy_paste=0.0, project="runs", name="{model}-1280-ourdata-v1", exist_ok=True)
 best = YOLO("runs/{model}-1280-ourdata-v1/weights/best.pt")
-best.val(data="/work/detect_consolidated/data.yaml", imgsz=1280, split="test")
+best.val(data="/work/{dsname}/data.yaml", imgsz=1280, split="test")
 PY
 tar czf results.tar.gz runs
 CODE=$(curl -sS --max-time 1800 -w '%{{http_code}}' -o /dev/null -T results.tar.gz "{results_url}")
@@ -75,12 +75,18 @@ def ensure_dataset(s3, bucket) -> None:
         return
     except Exception:
         pass
-    tmp = Path(tempfile.mkdtemp()) / "detect_consolidated.tar.gz"
-    print("packing dataset (1.7GB)...")
-    with tarfile.open(tmp, "w:gz") as t:
-        t.add(DATASET, arcname="detect_consolidated")
-    print(f"uploading dataset ({tmp.stat().st_size // 1_000_000} MB)...")
-    s3.upload_file(str(tmp), bucket, DATASET_KEY)
+    # STREAMED tar -> S3: no local temp tar (a 4GB temp copy filled the disk
+    # twice on 2026-08-01 — do not restore the tarfile path)
+    import subprocess
+    print(f"streaming dataset {DATASET.name} -> s3://{bucket}/{DATASET_KEY} ...", flush=True)
+    tar = subprocess.Popen(["tar", "-czf", "-", "-C", str(DATASET.parent),
+                            DATASET.name], stdout=subprocess.PIPE)
+    up = subprocess.run(["aws", "s3", "cp", "-",
+                         f"s3://{bucket}/{DATASET_KEY}",
+                         "--expected-size", "5500000000"], stdin=tar.stdout)
+    tar.stdout.close()
+    if tar.wait() != 0 or up.returncode != 0:
+        raise RuntimeError("streamed dataset upload failed")
 
 
 def launch(a) -> None:
@@ -98,7 +104,8 @@ def launch(a) -> None:
     tag = f"yolo_{a.model}"
     ud = userdata(presign("get", DATASET_KEY, 28800),
                   presign("put", J.results_key(tag), 172800),
-                  presign("put", J.log_key(tag), 172800), a.model, a.batch, a.epochs)
+                  presign("put", J.log_key(tag), 172800), a.model, a.batch, a.epochs,
+                  DATASET.name, a.failsafe)
     ec2 = boto3.client("ec2", region_name=region)
     r = ec2.run_instances(
         ImageId=aws.get("ami"), InstanceType=aws.get("instance_type", "g5.2xlarge"),
@@ -134,12 +141,25 @@ def fetch(a) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--dataset-dir", default=None,
+                    help="dataset root (default data/detect_consolidated)")
+    ap.add_argument("--dataset-key", default=None,
+                    help="S3 key for the dataset tar (default detect_consolidated key)")
     ap.add_argument("--model", required=True, choices=["yolo11s", "yolo11m", "yolo26s", "yolo26m"])
     ap.add_argument("--batch", type=int, default=8)
+    ap.add_argument("--failsafe", type=int, default=12600,
+                    help="seconds before instance self-terminates (size to epochs! "
+                         "the ball specialist died at epoch 21/120 on the old 3.5h)")
     ap.add_argument("--epochs", type=int, default=100)
     ap.add_argument("--fetch", action="store_true")
     ap.add_argument("--i-rotated-creds", action="store_true")
     a = ap.parse_args()
+    global DATASET, DATASET_KEY
+    if a.dataset_dir:
+        DATASET = REPO / a.dataset_dir
+        DATASET_KEY = f"{J.PREFIX}/{Path(a.dataset_dir).name}.tar.gz"
+        # dataset path inside the instance follows the dir name
+
     if a.fetch:
         fetch(a)
     else:
