@@ -78,10 +78,13 @@ you find out whether your tool is pleasant before committing hours.
 
 ## 2. Build the tool (FastAPI, same shape as Training_frameworks)
 
-Model it on
-`Training_frameworks/Uball 4Cam Detection/src/annotate_server.py` +
-`annotate_ui.html` — same pattern: FastAPI backend, single HTML page,
-`uvicorn` on `127.0.0.1:8000`, resumable state on disk.
+Model it on our existing annotation tool — same pattern: FastAPI backend,
+single HTML page, `uvicorn` on `127.0.0.1:8000`, resumable state on disk:
+- [annotate_server.py](https://github.com/rohitmk523/Training_frameworks/blob/main/Uball%204Cam%20Detection/src/annotate_server.py)
+- [annotate_ui.html](https://github.com/rohitmk523/Training_frameworks/blob/main/Uball%204Cam%20Detection/src/annotate_ui.html)
+
+Read both before designing yours — the state/resume handling and the
+keyboard-driven UI are the parts worth copying.
 
 ```
 your_repo/
