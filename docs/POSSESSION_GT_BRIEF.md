@@ -78,13 +78,42 @@ you find out whether your tool is pleasant before committing hours.
 
 ## 2. Build the tool (FastAPI, same shape as Training_frameworks)
 
-Model it on our existing annotation tool — same pattern: FastAPI backend,
-single HTML page, `uvicorn` on `127.0.0.1:8000`, resumable state on disk:
-- [annotate_server.py](https://github.com/rohitmk523/Training_frameworks/blob/main/Uball%204Cam%20Detection/src/annotate_server.py)
-- [annotate_ui.html](https://github.com/rohitmk523/Training_frameworks/blob/main/Uball%204Cam%20Detection/src/annotate_ui.html)
+### Reference implementation — read this first
 
-Read both before designing yours — the state/resume handling and the
-keyboard-driven UI are the parts worth copying.
+We already have a working annotation tool in the training repo. Yours is a
+different *task* but the same *architecture*, so start from it rather than
+from a blank file.
+
+**Repo:** https://github.com/rohitmk523/Training_frameworks
+**Folder:** `Uball 4Cam Detection/src/`
+- [annotate_server.py](https://github.com/rohitmk523/Training_frameworks/blob/main/Uball%204Cam%20Detection/src/annotate_server.py) — FastAPI backend (~200 lines)
+- [annotate_ui.html](https://github.com/rohitmk523/Training_frameworks/blob/main/Uball%204Cam%20Detection/src/annotate_ui.html) — the whole UI, one page, no build step
+
+**What that tool does:** walks thousands of training images, draws the
+detector's current boxes over each one, and lets a human approve / fix /
+delete them, writing corrected YOLO labels back to disk. Per-image approval
+state is persisted so a 5,000-image review survives being closed and reopened.
+
+**Copy these four things:**
+1. **The shape** — FastAPI + one HTML page + `uvicorn` on `127.0.0.1:8000`.
+   No framework, no bundler, no database.
+2. **Resumable state on disk** (`review_state.json` there) — you will not
+   finish 3 minutes, let alone 30, in one sitting.
+3. **`/api/...` JSON endpoints + a media route**; the page is dumb, the
+   server owns the data.
+4. **Keyboard-first UI.** Its speed comes from hotkeys, not clicking. Yours
+   depends on this even more.
+
+**What is genuinely different for you:**
+| that tool | yours |
+|---|---|
+| unit = one **image** | unit = one **moment in a video** (piecewise-constant possession) |
+| user **draws/edits boxes** | user **presses a player's key** when the ring is wrong — no drawing at all |
+| output = YOLO label files | output = **one JSON of holder segments** (§ format below) |
+| navigation = next/prev image | navigation = play/pause/scrub + jump-to-next-prediction-change |
+
+So: same skeleton, much simpler interaction. If you find yourself building a
+box editor, stop — you've copied the wrong half.
 
 ```
 your_repo/
