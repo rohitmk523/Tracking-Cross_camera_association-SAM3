@@ -58,7 +58,7 @@ The 30h-on-g4 quote is our workload on the wrong GPU, serially.
    same work doubles as the Jetson port groundwork.
 Target: **under 1 GPU-hour per game** on A10G.
 
-### P3 — Measure WHO directly (holder ground truth)
+### P3 — Measure WHO directly (holder ground truth)  [IN FLIGHT: docs/JUNIOR_BRIEF_POSSESSION_GT.md]
 Shot-WHO was our proxy metric; it left with the shot pipeline. The real
 metric now: **holder accuracy per frame**. Build the annotation loop —
 review video with our prediction preloaded, click to correct the ring when
@@ -68,6 +68,11 @@ honestly, and eventually to train a learned holder classifier.
 Baseline to beat, from the shot-era numbers: holder-at-release correct
 66/62/38/34% across the four games; track-exists oracle says 80-89% is
 there to be picked.
+**Scale agreed 2026-08-02: ~30 min total — c2a 10 (tune), e6 10 (tune),
+2c4 10 (HELD OUT). 5x2-min windows per game beat one contiguous 10.
+Phase 1 = the benchmarked c2a 600-780s window. Brief + tool spec for the
+annotator: docs/JUNIOR_BRIEF_POSSESSION_GT.md. Bar for "proper tracking":
+>=85% holder accuracy on the held-out game.**
 
 ### P4 — Sync + calibration hygiene (fusion's two silent killers)
 - **c2a re-sync re-solve**: FR measured ~8 frames off its recorded offset
