@@ -181,7 +181,24 @@ def _cluster_and_tag(doc, ap_path, dual, raw) -> int:
             c0, c1 = zs[assign].mean(), zs[~assign].mean()
         lo, hi = min(c0, c1), max(c0, c1)
         if not (lo < -0.3 and hi > 0.2):
-            print(f"#{num}: clusters not kit-opposed ({lo:.2f},{hi:.2f}) — left untagged")
+            # SINGLE-KIT CASE: a number is on the roster twice but only ONE of
+            # the two players actually appears in this window, so there is
+            # nothing to split. Leaving it untagged merges a real player into
+            # an ambiguous stream; instead tag the whole set by which side of
+            # the shade distribution it sits on (z is per-camera normalised
+            # over ALL players). Only when the set is unambiguously one-sided.
+            med = float(np.median(zs))
+            if med <= -0.45 or med >= 0.45:
+                kit = "W" if med > 0 else "B"
+                for i, n, z in zrows:
+                    if n == num:
+                        doc["anchors"][i]["kit"] = kit
+                        n_tagged += 1
+                print(f"#{num}: single kit in this window (median z={med:.2f}) "
+                      f"-> all tagged {kit}")
+            else:
+                print(f"#{num}: clusters not kit-opposed ({lo:.2f},{hi:.2f}) "
+                      f"and median z={med:.2f} ambiguous — left untagged")
             continue
         thr = float((lo + hi) / 2)
         for i, n, z in zrows:

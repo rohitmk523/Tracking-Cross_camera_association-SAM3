@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Engine v3 WHO — possession state machine over the full game.
+"""Possession state machine — WHO HAS THE BALL at every frame.
 
-Keeps the proven arc trigger (detection 88-94%); replaces release-instant
-attribution with the BALL STORY: shooter = the holder whose HOLD ends in the
-flight that reaches the rim. Rules from the prototype: catch-switching after
-flight, FLIGHT-END LANDING assignment (trajectory extrapolation names the
-catcher), backward fill between anchors.
+THE product. Consumes the smoothed per-camera ball trajectories and the
+cross-camera-fused player streams, and emits runs/tracking/ledger/
+holders_<game>.json (RLE segments of frame-range -> stream id).
+
+Rules: per-frame cross-camera hold votes, switch hysteresis, catch-after-
+flight, flight-end LANDING assignment, and RELEASE (nobody has the ball)
+when the ball is airborne or hold evidence has been absent too long.
+Scored against annotator GT by scripts/score_holders_gt.py.
 
   .venv/bin/python scripts/ballfirst_who.py --game c2a354fe
 """
@@ -29,6 +32,13 @@ HOLD_D = 0.7
 SWITCH_K = 6
 CATCH_K = 3
 FLIGHT_V = 14.0
+# RELEASE (nobody has the ball). GT says ~32% of frames have no holder;
+# without these the machine holds the last player forever and is wrong on
+# every one of them. Ball coverage is only ~50%/cam, so a dropout must NOT
+# release immediately — only sustained absence of any hold evidence does.
+import os
+FLIGHT_RELEASE = int(os.environ.get("UBALL_FLIGHT_RELEASE", 2))
+HOLD_GRACE = int(os.environ.get("UBALL_HOLD_GRACE", 10))
 
 
 def holder_timeline(game, tag, offs, tglob):
@@ -90,6 +100,7 @@ def holder_timeline(game, tag, offs, tglob):
     # state machine with catch + LANDING rule
     holder = {}
     cur, cand, streak, since_flight = None, None, 0, 99
+    since_hold = 0                          # frames since any positive hold vote
     last_flight = None                      # (ang, x, y, vx, vy, f)
     for f, state, votes, fv in obs:
         if state == "FLIGHT":
@@ -98,6 +109,10 @@ def holder_timeline(game, tag, offs, tglob):
                 last_flight = (*fv, f)
         else:
             since_flight += 1
+        if state != "HOLD" or not votes:
+            since_hold += 1
+        else:
+            since_hold = 0
         if state == "HOLD" and votes:
             top = max(votes, key=votes.get)
             # LANDING rule: right after flight, prefer the stream whose box
@@ -125,6 +140,10 @@ def holder_timeline(game, tag, offs, tglob):
                     streak = 0
             else:
                 streak = 0
+        # RELEASE: ball airborne with no candidate, or no hold evidence for
+        # long enough that continuing to name a holder is a fabrication.
+        if (state == "FLIGHT" and since_hold > FLIGHT_RELEASE) or since_hold > HOLD_GRACE:
+            cur, cand, streak = None, None, 0
         if cur is not None:
             holder[f] = cur
     return holder, tracks
@@ -140,10 +159,6 @@ def main() -> int:
     offs = GAME_OFFS[game]
     tglob = a.tracks_glob or ("runs/events_fg_{tag}" if game == "e6fba750"
                               else f"runs/events_fg_{game[:3]}_{{tag}}")
-    playsf = a.plays or f"data/plays/{game}_full.json"
-    led = json.loads((REPO / f"runs/tracking/ledger/shots_{game}_full.json").read_text())
-    plays = json.loads((REPO / playsf).read_text())["plays"]
-    gt = [p for p in plays if ("MAKE" in p["cls"] or "MISS" in p["cls"])]
     roster = json.loads((REPO / f"data/rosters/{game}.json").read_text())
     by_num = defaultdict(list)
     for p in roster["players"]:
@@ -178,60 +193,6 @@ def main() -> int:
     outp.write_text(json.dumps({"fps": FPS, "segments": segs}))
     print(f"holder cache -> {outp} ({len(segs)} segments)")
 
-    base_ok = v3_ok = tgf_ok = tot = 0
-    rows = []
-    for g in gt:
-        cand = [o for o in led if abs(o["t"] - g["t"]) <= 1.5 and o.get("rel_f") is not None]
-        if not cand:
-            continue
-        o = min(cand, key=lambda o: (o.get("rq") is None, o.get("rq", 9.9),
-                                     abs(o["t"] - g["t"])))
-        tot += 1
-        gt_last = g["a"].split()[-1]
-        base_ok += bool(o["pred_player"]
-                        and o["pred_player"].rstrip("?").split()[-1] == gt_last)
-        tl = timelines[o["chunk"]]
-        arr = o["arrive_f"]
-        # v3 WHO: holder at the release moment (HOLD feeding the arc's
-        # flight) — a stale last-holder from seconds earlier must not count
-        rel = o.get("rel_f") or (arr - 20)
-        pick = None
-        pf = None
-        for f in range(rel + 8, rel - int(1.2 * FPS), -1):
-            h = tl.get(f)
-            if h is not None:
-                pick, pf = h, f
-                break
-        # AMBIG fallback: v3 pick resolves to '?' (dual number, no kit
-        # suffix in the stream id) -> use baseline's answer for that play
-        fb_name = name_last(pick) if pick else "?"
-        if fb_name == "?" and o["pred_player"]:
-            fb_name = o["pred_player"].rstrip("?").split()[-1]
-        tgf_ok += fb_name == gt_last
-        v3_ok += bool(pick and name_last(pick) == gt_last)
-        b_ok = bool(o["pred_player"]
-                    and o["pred_player"].rstrip("?").split()[-1] == gt_last)
-        v_ok = bool(pick and name_last(pick) == gt_last)
-        agree = bool(pick and o["pred_player"]
-                     and name_last(pick) == o["pred_player"].rstrip("?").split()[-1])
-        rows.append({"b": b_ok, "v": v_ok, "agree": agree,
-                     "rq": o.get("rq"), "cls": g["cls"],
-                     "dist": o.get("release_dist_cm")})
-    print(f"\n{game}: n={tot} | baseline {base_ok}/{tot} ({base_ok/tot:.0%}) "
-          f"| v3 {v3_ok}/{tot} ({v3_ok/tot:.0%}) "
-          f"| v3+ambig-fb {tgf_ok}/{tot} ({tgf_ok/tot:.0%})")
-    def score(rule, label):
-        ok = sum((r["v"] if rule(r) else r["b"]) for r in rows)
-        print(f"  arbiter [{label}]: {ok}/{tot} ({ok/tot:.0%})")
-    score(lambda r: not r["agree"] and r["rq"] is not None and r["rq"] > 0.6,
-          "a: disagree & dirty release -> v3")
-    score(lambda r: r["rq"] is not None and r["rq"] > 0.6, "b: dirty release -> v3")
-    score(lambda r: (r["dist"] or 9e9) < 500, "c: paint shots -> v3")
-    score(lambda r: not r["agree"] and (r["dist"] or 9e9) < 600,
-          "d: disagree & close -> v3")
-    both = sum(1 for r in rows if r["b"] and r["v"])
-    print(f"  union {sum(1 for r in rows if r['b'] or r['v'])}/{tot} | "
-          f"both {both} | agree-rate {sum(r['agree'] for r in rows)}/{tot}")
     return 0
 
 
